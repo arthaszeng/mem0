@@ -15,6 +15,7 @@ Key features:
 - Environment variable parsing for API keys
 """
 
+import asyncio
 import contextvars
 import datetime
 import json
@@ -39,11 +40,22 @@ load_dotenv()
 # Initialize MCP
 mcp = FastMCP("mem0-mcp-server")
 
+# ---------------------------------------------------------------------------
+# Background memory-write queue: add_memories enqueues and returns immediately;
+# a single async worker drains the queue, running the heavy mem0 add() in a
+# thread so it never blocks the event loop.
+# ---------------------------------------------------------------------------
+_memory_task_queue: asyncio.Queue | None = None
+
+
+def _get_queue() -> asyncio.Queue:
+    global _memory_task_queue
+    if _memory_task_queue is None:
+        _memory_task_queue = asyncio.Queue()
+    return _memory_task_queue
+
 
 def _run_categorization_in_background(memory_id: uuid.UUID, content: str):
-    """Schedule categorize_memory_background to run in a thread so it doesn't
-    block the async MCP handler. FastAPI BackgroundTasks aren't available in
-    MCP tool handlers, so we use a thread instead."""
     import threading
     from app.models import categorize_memory_background
 
@@ -53,6 +65,100 @@ def _run_categorization_in_background(memory_id: uuid.UUID, content: str):
         daemon=True,
     )
     t.start()
+
+
+async def _memory_write_worker():
+    """Drain the queue and process memory writes one-by-one in a thread."""
+    q = _get_queue()
+    while True:
+        task = await q.get()
+        try:
+            uid, client_name, text = task
+            memory_client = get_memory_client_safe()
+            if not memory_client:
+                logging.warning("Memory worker: client unavailable, dropping task")
+                continue
+
+            response = await asyncio.to_thread(
+                memory_client.add, text,
+                user_id=uid,
+                metadata={"source_app": "openmemory", "mcp_client": client_name},
+            )
+
+            db = SessionLocal()
+            try:
+                user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+                memories_to_categorize: list[tuple[uuid.UUID, str]] = []
+
+                if isinstance(response, dict) and "results" in response:
+                    for result in response["results"]:
+                        memory_id = uuid.UUID(result["id"])
+                        memory = db.query(Memory).filter(Memory.id == memory_id).first()
+
+                        if result["event"] == "ADD":
+                            if not memory:
+                                memory = Memory(
+                                    id=memory_id,
+                                    user_id=user.id,
+                                    app_id=app.id,
+                                    content=result["memory"],
+                                    state=MemoryState.active,
+                                )
+                                db.add(memory)
+                            else:
+                                memory.state = MemoryState.active
+                                memory.content = result["memory"]
+
+                            db.add(MemoryStatusHistory(
+                                memory_id=memory_id,
+                                changed_by=user.id,
+                                old_state=MemoryState.deleted,
+                                new_state=MemoryState.active,
+                            ))
+                            memories_to_categorize.append((memory_id, result["memory"]))
+
+                        elif result["event"] == "UPDATE":
+                            if memory:
+                                memory.content = result["memory"]
+                                memory.updated_at = datetime.datetime.now(datetime.UTC)
+                            else:
+                                memory = Memory(
+                                    id=memory_id,
+                                    user_id=user.id,
+                                    app_id=app.id,
+                                    content=result["memory"],
+                                    state=MemoryState.active,
+                                )
+                                db.add(memory)
+                            memories_to_categorize.append((memory_id, result["memory"]))
+
+                        elif result["event"] == "DELETE":
+                            if memory:
+                                memory.state = MemoryState.deleted
+                                memory.deleted_at = datetime.datetime.now(datetime.UTC)
+                                db.add(MemoryStatusHistory(
+                                    memory_id=memory_id,
+                                    changed_by=user.id,
+                                    old_state=MemoryState.active,
+                                    new_state=MemoryState.deleted,
+                                ))
+
+                    db.commit()
+
+                for mid, content in memories_to_categorize:
+                    try:
+                        _run_categorization_in_background(mid, content)
+                    except Exception as cat_err:
+                        logging.warning(f"Categorization schedule failed for {mid}: {cat_err}")
+
+                logging.info(f"Memory worker processed write for user={uid}: {len(response.get('results', []))} results")
+            finally:
+                db.close()
+
+        except Exception as e:
+            logging.exception(f"Memory worker error: {e}")
+        finally:
+            q.task_done()
 
 # Don't initialize memory client at import time - do it lazily when needed
 def get_memory_client_safe():
@@ -83,7 +189,6 @@ async def add_memories(text: str) -> str:
     if not client_name:
         return "Error: client_name not provided"
 
-    # Get memory client safely
     memory_client = get_memory_client_safe()
     if not memory_client:
         return "Error: Memory system is currently unavailable. Please try again later."
@@ -91,93 +196,22 @@ async def add_memories(text: str) -> str:
     try:
         db = SessionLocal()
         try:
-            # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
-
-            # Check if app is active
             if not app.is_active:
                 return f"Error: App {app.name} is currently paused on OpenMemory. Cannot create new memories."
-
-            response = memory_client.add(text,
-                                         user_id=uid,
-                                         metadata={
-                                            "source_app": "openmemory",
-                                            "mcp_client": client_name,
-                                        })
-
-            memories_to_categorize = []
-
-            # Process the response and update database
-            if isinstance(response, dict) and 'results' in response:
-                for result in response['results']:
-                    memory_id = uuid.UUID(result['id'])
-                    memory = db.query(Memory).filter(Memory.id == memory_id).first()
-
-                    if result['event'] == 'ADD':
-                        if not memory:
-                            memory = Memory(
-                                id=memory_id,
-                                user_id=user.id,
-                                app_id=app.id,
-                                content=result['memory'],
-                                state=MemoryState.active
-                            )
-                            db.add(memory)
-                        else:
-                            memory.state = MemoryState.active
-                            memory.content = result['memory']
-
-                        history = MemoryStatusHistory(
-                            memory_id=memory_id,
-                            changed_by=user.id,
-                            old_state=MemoryState.deleted if memory else None,
-                            new_state=MemoryState.active
-                        )
-                        db.add(history)
-                        memories_to_categorize.append((memory_id, result['memory']))
-
-                    elif result['event'] == 'UPDATE':
-                        if memory:
-                            memory.content = result['memory']
-                            memory.updated_at = datetime.datetime.now(datetime.UTC)
-                        else:
-                            memory = Memory(
-                                id=memory_id,
-                                user_id=user.id,
-                                app_id=app.id,
-                                content=result['memory'],
-                                state=MemoryState.active
-                            )
-                            db.add(memory)
-                        memories_to_categorize.append((memory_id, result['memory']))
-
-                    elif result['event'] == 'DELETE':
-                        if memory:
-                            memory.state = MemoryState.deleted
-                            memory.deleted_at = datetime.datetime.now(datetime.UTC)
-                            history = MemoryStatusHistory(
-                                memory_id=memory_id,
-                                changed_by=user.id,
-                                old_state=MemoryState.active,
-                                new_state=MemoryState.deleted
-                            )
-                            db.add(history)
-
-                db.commit()
-
-            # Trigger background categorization for new/updated memories
-            for mid, content in memories_to_categorize:
-                try:
-                    _run_categorization_in_background(mid, content)
-                except Exception as cat_err:
-                    logging.warning(f"Failed to schedule categorization for {mid}: {cat_err}")
-
-            return json.dumps(response)
         finally:
             db.close()
     except Exception as e:
-        logging.exception(f"Error adding to memory: {e}")
-        return f"Error adding to memory: {e}"
+        logging.exception(f"Error validating user/app: {e}")
+        return f"Error: {e}"
+
+    q = _get_queue()
+    await q.put((uid, client_name, text))
+    pending = q.qsize()
+    return json.dumps({
+        "status": "queued",
+        "message": f"Memory is being processed in background (queue depth: {pending})",
+    })
 
 
 @mcp.tool(description="Search through stored memories. This method is called EVERYTIME the user asks anything.")
@@ -208,14 +242,16 @@ async def search_memory(query: str) -> str:
                 must=[FieldCondition(key="user_id", match=MatchValue(value=uid))]
             )
 
-            embeddings = memory_client.embedding_model.embed(query, "search")
+            def _do_search():
+                emb = memory_client.embedding_model.embed(query, "search")
+                return memory_client.vector_store.client.query_points(
+                    collection_name=memory_client.vector_store.collection_name,
+                    query=emb,
+                    query_filter=query_filter,
+                    limit=10,
+                ).points
 
-            hits = memory_client.vector_store.client.query_points(
-                collection_name=memory_client.vector_store.collection_name,
-                query=embeddings,
-                query_filter=query_filter,
-                limit=10,
-            ).points
+            hits = await asyncio.to_thread(_do_search)
 
             allowed = set(str(mid) for mid in accessible_memory_ids) if accessible_memory_ids else None
 
@@ -277,8 +313,7 @@ async def list_memories() -> str:
             # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
 
-            # Get all memories
-            memories = memory_client.get_all(user_id=uid)
+            memories = await asyncio.to_thread(memory_client.get_all, user_id=uid)
             filtered_memories = []
 
             # Filter memories based on permissions
@@ -357,10 +392,9 @@ async def delete_memories(memory_ids: list[str]) -> str:
             if not ids_to_delete:
                 return "Error: No accessible memories found with provided IDs"
 
-            # Delete from vector store
             for memory_id in ids_to_delete:
                 try:
-                    memory_client.delete(str(memory_id))
+                    await asyncio.to_thread(memory_client.delete, str(memory_id))
                 except Exception as delete_error:
                     logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
@@ -423,10 +457,9 @@ async def delete_all_memories() -> str:
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
-            # delete the accessible memories only
             for memory_id in accessible_memory_ids:
                 try:
-                    memory_client.delete(str(memory_id))
+                    await asyncio.to_thread(memory_client.delete, str(memory_id))
                 except Exception as delete_error:
                     logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
@@ -526,5 +559,9 @@ def setup_mcp_server(app: FastAPI):
     """Setup MCP server with the FastAPI application"""
     mcp._mcp_server.name = "mem0-mcp-server"
 
-    # Include MCP router in the FastAPI app
+    @app.on_event("startup")
+    async def _start_memory_worker():
+        asyncio.create_task(_memory_write_worker())
+        logging.info("Memory write worker started")
+
     app.include_router(mcp_router)

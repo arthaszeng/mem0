@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 
 from app.database import SessionLocal
@@ -22,6 +23,7 @@ _memory_client = None
 _config_hash = None
 _last_config_check: float = 0
 _CONFIG_CHECK_INTERVAL = 30  # seconds between full config rebuilds
+_init_lock = threading.Lock()
 
 COMPACT_UPDATE_MEMORY_PROMPT = """You are a memory manager. Compare new facts against existing memory and decide: ADD, UPDATE, DELETE, or NONE.
 
@@ -284,16 +286,18 @@ def get_memory_client(custom_instructions: str = None):
         current_config_hash = _get_config_hash(config)
 
         if _memory_client is None or _config_hash != current_config_hash:
-            logger.info(f"Initializing memory client (hash={current_config_hash})")
-            try:
-                _memory_client = Memory.from_config(config_dict=config)
-                _config_hash = current_config_hash
-                logger.info("Memory client initialized successfully")
-            except Exception as init_error:
-                logger.error(f"Failed to initialize memory client: {init_error}")
-                _memory_client = None
-                _config_hash = None
-                return None
+            with _init_lock:
+                if _memory_client is None or _config_hash != current_config_hash:
+                    logger.info(f"Initializing memory client (hash={current_config_hash})")
+                    try:
+                        _memory_client = Memory.from_config(config_dict=config)
+                        _config_hash = current_config_hash
+                        logger.info("Memory client initialized successfully")
+                    except Exception as init_error:
+                        logger.error(f"Failed to initialize memory client: {init_error}")
+                        _memory_client = None
+                        _config_hash = None
+                        return None
 
         _last_config_check = now
         return _memory_client

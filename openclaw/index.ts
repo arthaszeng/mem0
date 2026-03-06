@@ -249,6 +249,11 @@ class OSSProvider implements Mem0Provider {
         ? this.resolvePath(this.ossConfig.historyDbPath)
         : this.ossConfig.historyDbPath;
       config.historyDbPath = dbPath;
+    } else {
+      // OpenMemory backend already tracks full operation history;
+      // disable the redundant JS SDK SQLite history to avoid
+      // SQLITE_CANTOPEN in environments where CWD is not writable.
+      config.disableHistory = true;
     }
 
     if (this.customPrompt) config.customPrompt = this.customPrompt;
@@ -1452,19 +1457,19 @@ const memoryPlugin = {
           if (formattedMessages.length === 0) return;
 
           const addOpts = buildAddOptions(undefined, currentSessionId);
-          const result = await provider.add(
-            formattedMessages,
-            addOpts,
-          );
-
-          const capturedCount = result.results?.length ?? 0;
-          if (capturedCount > 0) {
-            api.logger.info(
-              `openclaw-mem0: auto-captured ${capturedCount} memories`,
-            );
-          }
+          // Fire-and-forget: don't block the agent response
+          provider.add(formattedMessages, addOpts).then((result) => {
+            const capturedCount = result.results?.length ?? 0;
+            if (capturedCount > 0) {
+              api.logger.info(
+                `openclaw-mem0: auto-captured ${capturedCount} memories`,
+              );
+            }
+          }).catch((err) => {
+            api.logger.warn(`openclaw-mem0: capture failed: ${String(err)}`);
+          });
         } catch (err) {
-          api.logger.warn(`openclaw-mem0: capture failed: ${String(err)}`);
+          api.logger.warn(`openclaw-mem0: capture setup failed: ${String(err)}`);
         }
       });
     }
