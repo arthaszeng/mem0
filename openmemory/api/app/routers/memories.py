@@ -21,8 +21,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi_pagination import Page, Params
 from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
+from app.utils.categorization import match_domain_by_keywords
+from app.utils.sensitive import sanitize_text
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memories"])
 
@@ -123,13 +125,22 @@ async def list_memories(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Build base query
-    query = db.query(Memory).filter(
+    base_filters = [
         Memory.user_id == user.id,
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
-        Memory.content.ilike(f"%{search_query}%") if search_query else True
-    )
+    ]
+
+    if search_query:
+        matched_domain = match_domain_by_keywords(search_query)
+        search_conditions = [Memory.content.ilike(f"%{search_query}%")]
+        if matched_domain:
+            search_conditions.append(
+                Memory.metadata_.op("->>")("domain") == matched_domain
+            )
+        base_filters.append(or_(*search_conditions))
+
+    query = db.query(Memory).filter(*base_filters)
 
     # Apply filters
     if app_id:
@@ -380,21 +391,21 @@ async def create_memory(
 
     logging.info(f"Creating memory for user_id: {request.user_id} with app: {request.app}")
 
+    safe_text = sanitize_text(request.text)
+
     try:
         memory_client = get_memory_client()
         if not memory_client:
             raise Exception("Memory client is not available")
     except Exception as client_error:
         logging.warning(f"Memory client unavailable: {client_error}. Creating memory in database only.")
-        # Return a json response with the error
         return {
             "error": str(client_error)
         }
 
-    # Try to save to Qdrant via memory_client
     try:
         qdrant_response = memory_client.add(
-            request.text,
+            safe_text,
             user_id=request.user_id,  # Use string user_id to match search
             metadata={
                 "source_app": "openmemory",
@@ -695,9 +706,15 @@ async def filter_memories(
     if not request.show_archived:
         query = query.filter(Memory.state != MemoryState.archived)
 
-    # Apply search filter
+    # Apply search filter with domain-aware expansion
     if request.search_query:
-        query = query.filter(Memory.content.ilike(f"%{request.search_query}%"))
+        search_conditions = [Memory.content.ilike(f"%{request.search_query}%")]
+        matched_domain = match_domain_by_keywords(request.search_query)
+        if matched_domain:
+            search_conditions.append(
+                Memory.metadata_.op("->>")("domain") == matched_domain
+            )
+        query = query.filter(or_(*search_conditions))
 
     # Apply app filter
     if request.app_ids:

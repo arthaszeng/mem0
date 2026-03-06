@@ -33,6 +33,9 @@ Rules:
 - DELETE: New fact makes an existing memory obsolete/invalid.
 - NONE: Existing memory already covers this fact. No change needed.
 - When updating, merge related info into one concise entry rather than keeping duplicates.
+- CRITICAL: Every fact starts with a [Domain] prefix like [OSMP会议管理] or [mem0记忆系统]. You MUST preserve the [Domain] prefix in ALL output. Never drop it.
+- CRITICAL: If any fact contains #hashtag prefixes, preserve ALL hashtags after the [Domain] prefix.
+- When merging facts from different domains, do NOT merge them — keep them as separate entries.
 - Only output the JSON object, nothing else.
 """
 
@@ -265,19 +268,23 @@ def get_memory_client(custom_instructions: str = None):
         except Exception as e:
             logger.warning(f"Error loading config from database: {e}, using defaults")
 
-        instructions_to_use = custom_instructions or db_custom_instructions
-        if instructions_to_use:
-            config["custom_fact_extraction_prompt"] = instructions_to_use
+        from app.utils.prompts import build_fact_extraction_prompt
 
-        # P0: Compact merge-decision prompt — reduces input tokens for the second LLM call
+        # Always use the dynamically built prompt so domain registry
+        # changes and security rules take effect without restart.
+        # Manual custom_instructions from DB/param can override if set.
+        instructions_to_use = custom_instructions or db_custom_instructions
+        config["custom_fact_extraction_prompt"] = (
+            instructions_to_use or build_fact_extraction_prompt()
+        )
+
         config["custom_update_memory_prompt"] = COMPACT_UPDATE_MEMORY_PROMPT
 
-        # P0: Cap output tokens — Ollama maps max_tokens → num_predict
         if config.get("llm", {}).get("provider") == "ollama":
             llm_cfg = config["llm"]["config"]
-            llm_cfg.setdefault("max_tokens", 500)
-            if llm_cfg.get("max_tokens", 2000) > 500:
-                llm_cfg["max_tokens"] = 500
+            llm_cfg.setdefault("max_tokens", 800)
+            if llm_cfg.get("max_tokens", 2000) > 800:
+                llm_cfg["max_tokens"] = 800
             llm_cfg["temperature"] = 0
             llm_cfg["top_p"] = 0.9
 

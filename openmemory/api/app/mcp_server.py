@@ -26,7 +26,10 @@ from app.database import SessionLocal
 from app.models import Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
 from app.utils.db import get_user_and_app
 from app.utils.memory import get_memory_client
+from app.utils.categorization import match_domain_by_keywords
+from app.utils.domain_registry import add_domain, auto_discover_domains, get_domains
 from app.utils.permissions import check_memory_access_permissions
+from app.utils.sensitive import sanitize_text
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRouter
@@ -78,6 +81,8 @@ async def _memory_write_worker():
             if not memory_client:
                 logging.warning("Memory worker: client unavailable, dropping task")
                 continue
+
+            text = sanitize_text(text)
 
             response = await asyncio.to_thread(
                 memory_client.add, text,
@@ -223,7 +228,6 @@ async def search_memory(query: str) -> str:
     if not client_name:
         return "Error: client_name not provided"
 
-    # Get memory client safely
     memory_client = get_memory_client_safe()
     if not memory_client:
         return "Error: Memory system is currently unavailable. Please try again later."
@@ -231,10 +235,8 @@ async def search_memory(query: str) -> str:
     try:
         db = SessionLocal()
         try:
-            # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
 
-            # Get accessible memory IDs based on ACL
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
@@ -256,11 +258,12 @@ async def search_memory(query: str) -> str:
             allowed = set(str(mid) for mid in accessible_memory_ids) if accessible_memory_ids else None
 
             results = []
+            seen_ids = set()
             for h in hits:
                 id, score, payload = str(h.id), h.score, h.payload or {}
                 if allowed and (id is None or id not in allowed):
                     continue
-
+                seen_ids.add(id)
                 results.append({
                     "id": id,
                     "memory": payload.get("data"),
@@ -270,8 +273,40 @@ async def search_memory(query: str) -> str:
                     "score": score,
                 })
 
-            for r in results: 
-                if r.get("id"): 
+            # --- Domain-augmented search ---
+            matched_domain = match_domain_by_keywords(query)
+            if matched_domain:
+                domain_memories = (
+                    db.query(Memory)
+                    .filter(
+                        Memory.user_id == user.id,
+                        Memory.state == MemoryState.active,
+                        Memory.metadata_.op("->>")(  # JSON extract "domain"
+                            "domain"
+                        ) == matched_domain,
+                    )
+                    .order_by(Memory.updated_at.desc())
+                    .limit(20)
+                    .all()
+                )
+                for dm in domain_memories:
+                    mid = str(dm.id)
+                    if mid in seen_ids:
+                        continue
+                    if allowed and mid not in allowed:
+                        continue
+                    seen_ids.add(mid)
+                    results.append({
+                        "id": mid,
+                        "memory": dm.content,
+                        "hash": None,
+                        "created_at": dm.created_at.isoformat() if dm.created_at else None,
+                        "updated_at": dm.updated_at.isoformat() if dm.updated_at else None,
+                        "score": 0.5,  # domain-match baseline score
+                    })
+
+            for r in results:
+                if r.get("id"):
                     access_log = MemoryAccessLog(
                         memory_id=uuid.UUID(r["id"]),
                         app_id=app.id,
@@ -496,6 +531,54 @@ async def delete_all_memories() -> str:
     except Exception as e:
         logging.exception(f"Error deleting memories: {e}")
         return f"Error deleting memories: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Domain management tools (does NOT change existing tool interfaces)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="List all registered memory domains. Use this to see what project/domain categories are available for memory classification.")
+async def list_domains() -> str:
+    try:
+        domains = get_domains()
+        lines = [f"Registered domains ({len(domains)}):"]
+        for name, info in domains.items():
+            aliases_str = ", ".join(info.get("aliases", [])[:5])
+            kw_str = ", ".join(info.get("keywords", [])[:5])
+            lines.append(f"  - {name} ({info.get('display', '')})")
+            lines.append(f"    aliases: {aliases_str}")
+            lines.append(f"    keywords: {kw_str}...")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error listing domains: {e}"
+
+
+@mcp.tool(description="Add or update a memory domain. Provide a name (like 'ProjectX/Feature'), display name (Chinese), comma-separated aliases, and comma-separated keywords.")
+async def manage_domain(name: str, display: str, aliases: str, keywords: str) -> str:
+    try:
+        alias_list = [a.strip() for a in aliases.split(",") if a.strip()]
+        kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+        add_domain(name=name, display=display, aliases=alias_list, keywords=kw_list)
+        return f"Domain '{name}' ({display}) saved with {len(alias_list)} aliases and {len(kw_list)} keywords. Cache invalidated."
+    except Exception as e:
+        return f"Error managing domain: {e}"
+
+
+@mcp.tool(description="Show domain candidates discovered automatically from memories. These are domains the LLM suggested that aren't in the registry yet.")
+async def show_domain_candidates() -> str:
+    try:
+        suggestions = auto_discover_domains()
+        if not suggestions:
+            return "No domain candidates found yet. Candidates are recorded when the LLM suggests unknown domains during memory classification."
+        lines = [f"Domain candidates ({len(suggestions)}):"]
+        for s in suggestions:
+            status = "AUTO-PROMOTABLE" if s["auto_promotable"] else "needs more data"
+            lines.append(f"  - '{s['candidate']}' (count={s['count']}, {status})")
+            if s.get("snippets"):
+                lines.append(f"    sample: {s['snippets'][0][:100]}...")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error showing candidates: {e}"
 
 
 @mcp_router.get("/{client_name}/sse/{user_id}")

@@ -189,15 +189,33 @@ class MemoryAccessLog(Base):
     )
 
 def categorize_memory_background(memory_id: uuid.UUID, content: str) -> None:
-    """Categorize a memory in the background. Safe to call from BackgroundTasks."""
+    """Classify a memory (domain + categories + tags) in the background.
+
+    Also performs a second-pass sensitive data check on the stored content.
+    If the LLM fact extraction leaked a secret, we mask it here before
+    it persists.
+    """
     from app.database import SessionLocal
-    from app.utils.categorization import get_categories_for_memory
+    from app.utils.categorization import classify_memory
+    from app.utils.sensitive import has_sensitive_content, mask_sensitive
 
     db = SessionLocal()
     try:
-        categories = get_categories_for_memory(content)
-        if not categories:
-            return
+        # Second-pass: mask any sensitive data that survived ingestion
+        memory = db.query(Memory).filter(Memory.id == memory_id).first()
+        if memory and has_sensitive_content(memory.content):
+            original = memory.content
+            memory.content = mask_sensitive(memory.content)
+            logger.warning(
+                "Sensitive data detected in memory %s during post-storage check; masked",
+                memory_id,
+            )
+
+        domain, categories, tags = classify_memory(content)
+
+        db.execute(
+            memory_categories.delete().where(memory_categories.c.memory_id == memory_id)
+        )
 
         for category_name in categories:
             category = db.query(Category).filter(Category.name == category_name).first()
@@ -209,25 +227,27 @@ def categorize_memory_background(memory_id: uuid.UUID, content: str) -> None:
                 db.add(category)
                 db.flush()
 
-            existing = db.execute(
-                memory_categories.select().where(
-                    (memory_categories.c.memory_id == memory_id) &
-                    (memory_categories.c.category_id == category.id)
+            db.execute(
+                memory_categories.insert().values(
+                    memory_id=memory_id,
+                    category_id=category.id
                 )
-            ).first()
+            )
 
-            if not existing:
-                db.execute(
-                    memory_categories.insert().values(
-                        memory_id=memory_id,
-                        category_id=category.id
-                    )
-                )
+        if memory:
+            meta = dict(memory.metadata_ or {})
+            meta["domain"] = domain
+            meta["tags"] = tags
+            memory.metadata_ = meta
+            sa.orm.attributes.flag_modified(memory, "metadata_")
 
         db.commit()
-        logger.info(f"Categorized memory {memory_id}: {categories}")
+        logger.info(
+            "Classified memory %s: domain=%s, categories=%s, tags=%s",
+            memory_id, domain, categories, tags,
+        )
     except Exception as e:
         db.rollback()
-        logger.error(f"Background categorization failed for {memory_id}: {e}")
+        logger.error("Background categorization failed for %s: %s", memory_id, e)
     finally:
         db.close()
