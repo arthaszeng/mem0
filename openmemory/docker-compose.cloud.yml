@@ -32,9 +32,11 @@ services:
     image: mem0/openmemory-ui:latest
     ports:
       - "3001:3000"
+    env_file:
+      - api/.env
     environment:
       - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8765}
-      - NEXT_PUBLIC_USER_ID=${USER}
+      - NEXT_PUBLIC_USER_ID=${MEM0_USER:-${USER}}
     depends_on:
       - openmemory-mcp
     restart: unless-stopped
