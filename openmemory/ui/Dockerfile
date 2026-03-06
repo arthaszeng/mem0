@@ -12,7 +12,9 @@ FROM base AS deps
 
 COPY package.json pnpm-lock.yaml ./
 
-RUN pnpm install --frozen-lockfile
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN pnpm config set registry ${NPM_REGISTRY} && \
+    pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /app

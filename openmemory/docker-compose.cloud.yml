@@ -9,7 +9,10 @@ services:
 
   openmemory-mcp:
     image: mem0/openmemory-mcp
-    build: api/
+    build:
+      context: api/
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     env_file:
       - api/.env
     depends_on:
@@ -24,6 +27,8 @@ services:
     build:
       context: ui/
       dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com/}
     image: mem0/openmemory-ui:latest
     ports:
       - "3001:3000"
