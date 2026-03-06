@@ -665,6 +665,9 @@ def setup_mcp_server(app: FastAPI):
     """Setup MCP server with the FastAPI application"""
     mcp._mcp_server.name = "mem0-mcp-server"
 
+    from app.mcp_prompts import register_prompts
+    register_prompts(mcp, user_id_var, client_name_var)
+
     @app.on_event("startup")
     async def _start_memory_worker():
         asyncio.create_task(_memory_write_worker())
