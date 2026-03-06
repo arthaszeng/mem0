@@ -581,6 +581,29 @@ async def show_domain_candidates() -> str:
         return f"Error showing candidates: {e}"
 
 
+@mcp.tool(description="Run a complex multi-step task using the LangGraph AI agent. The agent has access to memory tools and can search/store memories while executing. Use for tasks that need reasoning across multiple steps.")
+async def run_agent_task(prompt: str) -> str:
+    """Delegate a task to the LangGraph agent service."""
+    import os
+    import httpx
+
+    agent_url = os.getenv("LANGGRAPH_AGENT_URL", "http://127.0.0.1:8766")
+    uid = user_id_var.get("arthaszeng")
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{agent_url}/agent/run",
+                json={"prompt": prompt, "user_id": uid},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("response", str(data))
+    except httpx.ConnectError:
+        return "LangGraph agent service is not running. Start it first."
+    except Exception as e:
+        return f"Agent error: {e}"
+
+
 @mcp_router.get("/{client_name}/sse/{user_id}")
 async def handle_sse(request: Request):
     """Handle SSE connections for a specific user and client"""
