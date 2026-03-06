@@ -1,4 +1,5 @@
 import datetime
+import os
 from uuid import uuid4
 
 from app.config import DEFAULT_APP_ID, USER_ID
@@ -6,12 +7,37 @@ from app.database import Base, SessionLocal, engine
 from app.mcp_server import setup_mcp_server
 from app.models import App, User
 from app.routers import apps_router, backup_router, config_router, domains_router, memories_router, stats_router
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi_pagination import add_pagination
+from starlette.middleware.base import BaseHTTPMiddleware
+
+API_KEY = os.getenv("API_KEY", "")
+API_KEY_EXEMPT_PREFIXES = ("/mcp/", "/docs", "/openapi.json", "/redoc")
+
+
+class ApiKeyMiddleware(BaseHTTPMiddleware):
+    """Optional API key auth. Skipped when API_KEY env var is empty."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not API_KEY:
+            return await call_next(request)
+
+        path = request.url.path
+        if any(path.startswith(p) for p in API_KEY_EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        provided = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        if provided != API_KEY:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+
+        return await call_next(request)
+
 
 app = FastAPI(title="OpenMemory API")
 
+app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
