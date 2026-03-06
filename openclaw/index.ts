@@ -207,98 +207,49 @@ class PlatformProvider implements Mem0Provider {
 // ============================================================================
 // Open-Source Provider (Self-hosted)
 //
-// Uses direct Qdrant + Ollama clients instead of mem0ai/oss to avoid the
-// sqlite3 native module dependency that crashes OpenClaw's gateway runtime.
-// Writes are delegated to the OpenMemory API which handles LLM extraction,
-// embedding, Qdrant upsert, and SQLite registration in one call.
+// Pure REST API client — all operations go through the OpenMemory API which
+// handles embedding, Qdrant, SQLite, and LLM extraction internally. No direct
+// Qdrant or Ollama dependency, so embedding dimensions always match the server.
 // ============================================================================
 
 class OSSProvider implements Mem0Provider {
-  private qdrantClient: any;
-  private collectionName: string;
-  private openMemoryApiUrl: string;
-  private ollamaUrl: string;
-  private embedModel: string;
-  private initPromise: Promise<void> | null = null;
-  private ready = false;
+  private readonly apiUrl: string;
+  private readonly userId: string;
 
   constructor(
     private readonly ossConfig?: Mem0Config["oss"],
     private readonly customPrompt?: string,
     private readonly resolvePath?: (p: string) => string,
     openMemoryApiUrl?: string,
+    userId?: string,
   ) {
-    this.collectionName =
-      (ossConfig?.vectorStore?.config as any)?.collectionName ?? "openmemory";
-    this.openMemoryApiUrl = openMemoryApiUrl ?? "http://localhost:8765";
-
-    const embCfg = ossConfig?.embedder?.config as Record<string, unknown> | undefined;
-    this.ollamaUrl = String(
-      embCfg?.url ?? embCfg?.ollama_base_url ?? "http://localhost:11434",
-    );
-    this.embedModel = String(embCfg?.model ?? "nomic-embed-text");
+    this.apiUrl = (openMemoryApiUrl ?? "http://localhost:8765").replace(/\/+$/, "");
+    this.userId = userId ?? "default";
   }
 
-  private async ensureReady(): Promise<void> {
-    if (this.ready) return;
-    if (this.initPromise) return this.initPromise;
-    this.initPromise = this._init();
-    return this.initPromise;
-  }
-
-  private async _init(): Promise<void> {
-    const { QdrantClient } = await import("@qdrant/js-client-rest");
-    const vsCfg = this.ossConfig?.vectorStore?.config as Record<string, unknown> | undefined;
-    this.qdrantClient = new QdrantClient({
-      host: String(vsCfg?.host ?? "localhost"),
-      port: Number(vsCfg?.port ?? 6333),
-      checkCompatibility: false,
+  private async apiFetch<T>(
+    path: string,
+    init?: RequestInit,
+  ): Promise<T> {
+    const resp = await fetch(`${this.apiUrl}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...init?.headers },
     });
-
-    // Warm up: pull the embedding model so first real call is fast
-    try {
-      const pullResp = await fetch(`${this.ollamaUrl}/api/pull`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: this.embedModel, stream: false }),
-      });
-      if (pullResp.ok) console.log(`[INFO] Pulling model ${this.embedModel}...`);
-    } catch { /* Ollama may not support pull — ignore */ }
-
-    this.ready = true;
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error(`API ${init?.method ?? "GET"} ${path} failed: ${resp.status} ${errText}`);
+    }
+    return resp.json() as Promise<T>;
   }
 
-  /** Embed a text via the Ollama /api/embeddings endpoint. */
-  private async embed(text: string): Promise<number[]> {
-    const resp = await fetch(`${this.ollamaUrl}/api/embeddings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: this.embedModel, prompt: text }),
-    });
-    if (!resp.ok) throw new Error(`Ollama embed failed: ${resp.status}`);
-    const data = await resp.json() as { embedding: number[] };
-    return data.embedding;
-  }
-
-  private userFilter(userId: string): Record<string, unknown> {
-    return { must: [{ key: "user_id", match: { value: userId } }] };
-  }
-
-  /**
-   * Write memories via the OpenMemory API. The backend handles LLM fact
-   * extraction, dedup, embedding, Qdrant upsert, and SQLite registration
-   * in a single call — no need for the JS SDK's heavy Memory.add() pipeline.
-   */
   async add(
     messages: Array<{ role: string; content: string }>,
     options: AddOptions,
   ): Promise<AddResult> {
-    await this.ensureReady();
     const text = messages.map((m) => `${m.role}: ${m.content}`).join("\n");
     try {
-      const resp = await fetch(`${this.openMemoryApiUrl}/api/v1/memories/`, {
+      const body = await this.apiFetch<Record<string, unknown>>("/api/v1/memories/", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
           user_id: options.user_id,
@@ -307,92 +258,82 @@ class OSSProvider implements Mem0Provider {
           metadata: { source_app: "openclaw", mcp_client: "openclaw" },
         }),
       });
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => "");
-        console.error(`[mem0] add via API failed: ${resp.status} ${errText}`);
-        return { results: [] };
-      }
-      const body = await resp.json() as Record<string, unknown>;
       return normalizeAddResult(body);
     } catch (err) {
-      console.error(`[mem0] add via API error:`, err);
+      console.error(`[mem0] add error:`, err);
       return { results: [] };
     }
   }
 
   async search(query: string, options: SearchOptions): Promise<MemoryItem[]> {
-    await this.ensureReady();
     const limit = options.limit ?? options.top_k ?? 10;
-    const queryEmbedding = await this.embed(query);
-    const hits = await this.qdrantClient.search(this.collectionName, {
-      vector: queryEmbedding,
-      filter: this.userFilter(options.user_id),
-      limit,
-    });
-    const results: MemoryItem[] = (hits ?? []).map((h: any) => normalizeQdrantHit(h));
-    if (options.threshold != null) {
-      return results.filter(item => (item.score ?? 0) >= options.threshold!);
+    const threshold = options.threshold ?? 0;
+    try {
+      const body = await this.apiFetch<{ results: any[] }>("/api/v1/memories/search", {
+        method: "POST",
+        body: JSON.stringify({
+          query,
+          user_id: options.user_id,
+          limit,
+          threshold,
+        }),
+      });
+      return (body.results ?? []).map(normalizeMemoryItem);
+    } catch (err) {
+      console.error(`[mem0] search error:`, err);
+      return [];
     }
-    return results;
   }
 
   async get(memoryId: string): Promise<MemoryItem> {
-    await this.ensureReady();
-    const points = await this.qdrantClient.getPoints(this.collectionName, {
-      ids: [memoryId],
-      with_payload: true,
-    });
-    if (!points?.length) throw new Error(`Memory ${memoryId} not found`);
-    return normalizeQdrantHit(points[0]);
+    const raw = await this.apiFetch<Record<string, unknown>>(`/api/v1/memories/${memoryId}`);
+    return {
+      id: String(raw.id ?? memoryId),
+      memory: String(raw.text ?? raw.memory ?? ""),
+      user_id: raw.user_id as string | undefined,
+      categories: raw.categories as string[] | undefined,
+      metadata: raw.metadata_ as Record<string, unknown> | undefined,
+      created_at: raw.created_at ? String(raw.created_at) : undefined,
+      updated_at: raw.updated_at ? String(raw.updated_at) : undefined,
+    };
   }
 
   async getAll(options: ListOptions): Promise<MemoryItem[]> {
-    await this.ensureReady();
-    const response = await this.qdrantClient.scroll(this.collectionName, {
-      filter: this.userFilter(options.user_id),
-      limit: options.page_size ?? 100,
-      with_payload: true,
-      with_vectors: false,
+    const size = options.page_size ?? 100;
+    const params = new URLSearchParams({
+      user_id: options.user_id,
+      size: String(size),
     });
-    return (response?.points ?? []).map((p: any) => normalizeQdrantHit(p));
+    const body = await this.apiFetch<{ items: any[] }>(`/api/v1/memories/?${params}`);
+    return (body.items ?? []).map((item: any) => ({
+      id: String(item.id ?? ""),
+      memory: item.text ?? item.content ?? item.memory ?? "",
+      user_id: item.user_id,
+      categories: item.categories,
+      metadata: item.metadata_,
+      created_at: item.created_at ? String(item.created_at) : undefined,
+      updated_at: item.updated_at ? String(item.updated_at) : undefined,
+    }));
   }
 
   async delete(memoryId: string): Promise<void> {
-    await this.ensureReady();
     try {
-      await this.qdrantClient.delete(this.collectionName, {
-        points: [memoryId],
-      });
-    } catch { /* best-effort */ }
-    // Also remove from OpenMemory SQLite
-    try {
-      await fetch(`${this.openMemoryApiUrl}/api/v1/memories/${memoryId}/`, {
+      await this.apiFetch<unknown>("/api/v1/memories/", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: "default" }),
+        body: JSON.stringify({
+          memory_ids: [memoryId],
+          user_id: this.userId,
+        }),
       });
-    } catch { /* best-effort */ }
+    } catch (err) {
+      console.error(`[mem0] delete error:`, err);
+    }
   }
 }
 
 // ============================================================================
 // Result Normalizers
 // ============================================================================
-
-/** Normalize a raw Qdrant search/scroll hit into a MemoryItem. */
-function normalizeQdrantHit(hit: any): MemoryItem {
-  const p = hit.payload ?? {};
-  return {
-    id: String(hit.id ?? ""),
-    memory: p.data ?? "",
-    user_id: p.user_id ?? p.userId,
-    score: hit.score,
-    categories: p.categories,
-    metadata: p.metadata,
-    created_at: p.created_at ?? p.createdAt,
-    updated_at: p.updated_at ?? p.updatedAt,
-  };
-}
 
 function normalizeMemoryItem(raw: any): MemoryItem {
   return {
@@ -675,7 +616,7 @@ function createProvider(
 ): Mem0Provider {
   if (cfg.mode === "open-source") {
     return new OSSProvider(cfg.oss, cfg.customPrompt, (p) =>
-      api.resolvePath(p), cfg.openMemoryApiUrl,
+      api.resolvePath(p), cfg.openMemoryApiUrl, cfg.userId,
     );
   }
 
