@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import List, Optional, Set
@@ -21,6 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi_pagination import Page, Params
 from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 from pydantic import BaseModel
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 from app.utils.categorization import match_domain_by_keywords
@@ -97,6 +99,90 @@ def get_accessible_memory_ids(db: Session, app_id: UUID) -> Set[UUID]:
         allowed_memory_ids -= denied_memory_ids
 
     return allowed_memory_ids
+
+
+class SearchMemoryRequest(BaseModel):
+    query: str
+    user_id: str
+    limit: int = 10
+    threshold: float = 0.0
+
+
+@router.post("/search")
+async def search_memories_semantic(
+    request: SearchMemoryRequest,
+    db: Session = Depends(get_db),
+):
+    """Semantic vector search over memories using the configured embedder + Qdrant."""
+    memory_client = get_memory_client()
+    if not memory_client:
+        raise HTTPException(status_code=503, detail="Memory client unavailable")
+
+    query_filter = Filter(
+        must=[FieldCondition(key="user_id", match=MatchValue(value=request.user_id))]
+    )
+
+    def _do_search():
+        emb = memory_client.embedding_model.embed(request.query, "search")
+        return memory_client.vector_store.client.query_points(
+            collection_name=memory_client.vector_store.collection_name,
+            query=emb,
+            query_filter=query_filter,
+            limit=request.limit,
+        ).points
+
+    hits = await asyncio.to_thread(_do_search)
+
+    results = []
+    for h in hits:
+        payload = h.payload or {}
+        score = h.score if hasattr(h, "score") else 0
+        if score < request.threshold:
+            continue
+        results.append({
+            "id": str(h.id),
+            "memory": payload.get("data", ""),
+            "hash": payload.get("hash"),
+            "score": score,
+            "created_at": payload.get("created_at"),
+            "updated_at": payload.get("updated_at"),
+            "metadata": {
+                k: v for k, v in payload.items()
+                if k not in ("data", "hash", "created_at", "updated_at")
+            },
+        })
+
+    matched_domain = match_domain_by_keywords(request.query)
+    if matched_domain:
+        user = db.query(User).filter(User.user_id == request.user_id).first()
+        if user:
+            seen_ids = {r["id"] for r in results}
+            domain_memories = (
+                db.query(Memory)
+                .filter(
+                    Memory.user_id == user.id,
+                    Memory.state == MemoryState.active,
+                    Memory.metadata_.op("->>")("domain") == matched_domain,
+                )
+                .limit(request.limit)
+                .all()
+            )
+            for dm in domain_memories:
+                mid = str(dm.id)
+                if mid in seen_ids:
+                    continue
+                seen_ids.add(mid)
+                results.append({
+                    "id": mid,
+                    "memory": dm.content,
+                    "hash": None,
+                    "score": 0.5,
+                    "created_at": dm.created_at.isoformat() if dm.created_at else None,
+                    "updated_at": dm.updated_at.isoformat() if dm.updated_at else None,
+                    "metadata": dm.metadata_ or {},
+                })
+
+    return {"results": results}
 
 
 # List all memories with filtering
