@@ -18,7 +18,7 @@ services:
     depends_on:
       - mem0_store
     ports:
-      - "8765:8765"
+      - "127.0.0.1:8765:8765"
     volumes:
       - openmemory_data:/data
     restart: unless-stopped
@@ -31,7 +31,7 @@ services:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com/}
     image: mem0/openmemory-ui:latest
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8765}
       - NEXT_PUBLIC_USER_ID=${MEM0_USER}
@@ -42,7 +42,7 @@ services:
   lobe-chat:
     image: lobehub/lobe-chat:latest
     ports:
-      - "3210:3210"
+      - "127.0.0.1:3210:3210"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_PROXY_URL=${OPENAI_BASE_URL:-https://millionengine.com/v1}
