@@ -25,6 +25,9 @@ COPY . .
 
 RUN cp next.config.dev.mjs next.config.mjs
 RUN cp .env.example .env
+
+ARG NODE_BUILD_MEM=1024
+ENV NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_MEM}"
 RUN pnpm build
 
 FROM base AS runner
