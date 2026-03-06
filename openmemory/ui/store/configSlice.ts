@@ -24,9 +24,19 @@ export interface EmbedderProvider {
   config: EmbedderConfig;
 }
 
+export interface VectorStoreConfig {
+  [key: string]: any;
+}
+
+export interface VectorStoreProvider {
+  provider: string;
+  config: VectorStoreConfig;
+}
+
 export interface Mem0Config {
   llm?: LLMProvider;
   embedder?: EmbedderProvider;
+  vector_store?: VectorStoreProvider;
 }
 
 export interface OpenMemoryConfig {
@@ -59,6 +69,15 @@ const initialState: ConfigState = {
       config: {
         model: 'text-embedding-3-small',
         api_key: 'env:OPENAI_API_KEY',
+      },
+    },
+    vector_store: {
+      provider: 'qdrant',
+      config: {
+        host: 'mem0_store',
+        port: 6333,
+        collection_name: 'openmemory',
+        embedding_model_dims: 1536,
       },
     },
   },
@@ -95,6 +114,9 @@ const configSlice = createSlice({
     updateEmbedder: (state, action: PayloadAction<EmbedderProvider>) => {
       state.mem0.embedder = action.payload;
     },
+    updateVectorStore: (state, action: PayloadAction<VectorStoreProvider>) => {
+      state.mem0.vector_store = action.payload;
+    },
     updateMem0Config: (state, action: PayloadAction<Mem0Config>) => {
       state.mem0 = action.payload;
     },
@@ -108,6 +130,7 @@ export const {
   updateOpenMemory,
   updateLLM,
   updateEmbedder,
+  updateVectorStore,
   updateMem0Config,
 } = configSlice.actions;
 

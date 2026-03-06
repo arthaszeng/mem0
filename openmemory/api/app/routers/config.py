@@ -47,7 +47,7 @@ class ConfigSchema(BaseModel):
     mem0: Optional[Mem0Config] = None
 
 def get_default_configuration():
-    """Get the default configuration with sensible defaults for LLM and embedder."""
+    """Get the default configuration with sensible defaults for LLM, embedder and vector store."""
     return {
         "openmemory": {
             "custom_instructions": None
@@ -69,7 +69,15 @@ def get_default_configuration():
                     "api_key": "env:OPENAI_API_KEY"
                 }
             },
-            "vector_store": None
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "host": "mem0_store",
+                    "port": 6333,
+                    "collection_name": "openmemory",
+                    "embedding_model_dims": 1536
+                }
+            }
         }
     }
 
@@ -143,17 +151,26 @@ async def update_configuration(config: ConfigSchema, db: Session = Depends(get_d
     """Update the configuration."""
     current_config = get_config_from_db(db)
     
-    # Convert to dict for processing
     updated_config = current_config.copy()
     
-    # Update openmemory settings if provided
     if config.openmemory is not None:
         if "openmemory" not in updated_config:
             updated_config["openmemory"] = {}
         updated_config["openmemory"].update(config.openmemory.dict(exclude_none=True))
     
-    # Update mem0 settings
-    updated_config["mem0"] = config.mem0.dict(exclude_none=True)
+    if config.mem0 is not None:
+        incoming = config.mem0.dict(exclude_none=True)
+        if "mem0" not in updated_config:
+            updated_config["mem0"] = {}
+        for key in ("llm", "embedder"):
+            if key in incoming:
+                updated_config["mem0"][key] = incoming[key]
+        if "vector_store" in incoming:
+            updated_config["mem0"]["vector_store"] = incoming["vector_store"]
+
+    save_config_to_db(db, updated_config)
+    reset_memory_client()
+    return updated_config
     
 
 @router.patch("/", response_model=ConfigSchema)

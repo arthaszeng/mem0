@@ -97,6 +97,35 @@ export function FormView({ settings, onChange }: FormViewProps) {
     })
   }
 
+  const handleVectorStoreProviderChange = (value: string) => {
+    onChange({
+      ...settings,
+      mem0: {
+        ...settings.mem0,
+        vector_store: {
+          ...settings.mem0.vector_store,
+          provider: value,
+        },
+      },
+    })
+  }
+
+  const handleVectorStoreConfigChange = (key: string, value: any) => {
+    onChange({
+      ...settings,
+      mem0: {
+        ...settings.mem0,
+        vector_store: {
+          ...settings.mem0.vector_store,
+          config: {
+            ...settings.mem0.vector_store?.config,
+            [key]: value,
+          },
+        },
+      },
+    })
+  }
+
   const needsLlmApiKey = settings.mem0?.llm?.provider?.toLowerCase() !== "ollama"
   const needsEmbedderApiKey = settings.mem0?.embedder?.provider?.toLowerCase() !== "ollama"
   const isLlmOllama = settings.mem0?.llm?.provider?.toLowerCase() === "ollama"
@@ -131,6 +160,15 @@ export function FormView({ settings, onChange }: FormViewProps) {
     "Together": "together",
     "LangChain": "langchain",
     "AWS Bedrock": "aws_bedrock",
+  }
+
+  const VECTOR_STORE_PROVIDERS = {
+    "Qdrant": "qdrant",
+    "Chroma": "chroma",
+    "Pinecone": "pinecone",
+    "Milvus": "milvus",
+    "PgVector": "pgvector",
+    "Redis": "redis",
   }
 
   return (
@@ -349,6 +387,82 @@ export function FormView({ settings, onChange }: FormViewProps) {
               </p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Vector Store Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Vector Store Settings</CardTitle>
+          <CardDescription>Configure the vector database for memory storage and retrieval</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="vs-provider">Provider</Label>
+            <Select
+              value={settings.mem0?.vector_store?.provider || "qdrant"}
+              onValueChange={handleVectorStoreProviderChange}
+            >
+              <SelectTrigger id="vs-provider">
+                <SelectValue placeholder="Select a vector store" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(VECTOR_STORE_PROVIDERS).map(([label, value]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="vs-host">Host</Label>
+            <Input
+              id="vs-host"
+              placeholder="mem0_store"
+              value={settings.mem0?.vector_store?.config?.host || ""}
+              onChange={(e) => handleVectorStoreConfigChange("host", e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Docker service name or hostname (e.g. mem0_store, localhost)
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="vs-port">Port</Label>
+            <Input
+              id="vs-port"
+              type="number"
+              placeholder="6333"
+              value={settings.mem0?.vector_store?.config?.port || ""}
+              onChange={(e) => handleVectorStoreConfigChange("port", Number.parseInt(e.target.value) || "")}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="vs-collection">Collection Name</Label>
+            <Input
+              id="vs-collection"
+              placeholder="openmemory"
+              value={settings.mem0?.vector_store?.config?.collection_name || ""}
+              onChange={(e) => handleVectorStoreConfigChange("collection_name", e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="vs-dims">Embedding Dimensions</Label>
+            <Input
+              id="vs-dims"
+              type="number"
+              placeholder="1536"
+              value={settings.mem0?.vector_store?.config?.embedding_model_dims || ""}
+              onChange={(e) => handleVectorStoreConfigChange("embedding_model_dims", Number.parseInt(e.target.value) || "")}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Must match the embedder model output dimensions (e.g. 1536 for text-embedding-3-small)
+            </p>
+          </div>
         </CardContent>
       </Card>
 
