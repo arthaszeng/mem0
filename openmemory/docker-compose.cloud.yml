@@ -40,7 +40,7 @@ services:
     restart: unless-stopped
 
   lobe-chat:
-    image: lobehub/lobe-chat:v1.80.2
+    image: lobehub/lobe-chat:latest
     ports:
       - "3210:3210"
     environment:
