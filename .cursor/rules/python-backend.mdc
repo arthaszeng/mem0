@@ -10,7 +10,7 @@ alwaysApply: false
 
 - **框架**: FastAPI + SQLAlchemy (SQLite)
 - **向量存储**: Qdrant（`mem0_store` 容器，端口 6333）
-- **LLM/Embedding**: Ollama 本地运行（宿主机 port 11434）
+- **LLM/Embedding**: Ollama (本地) 或 OpenAI (云端)，通过 CATEGORIZATION_PROVIDER 配置
 - **MCP Server**: SSE 传输，端口 8765
 
 ## 关键路径
@@ -20,7 +20,7 @@ alwaysApply: false
 | `routers/memories.py` | REST API 端点 |
 | `mcp_server.py` | MCP 工具实现 |
 | `models.py` | SQLAlchemy 模型 + 后台分类 |
-| `utils/categorization.py` | Ollama 分类调用 |
+| `utils/categorization.py` | LLM 分类调用 (Ollama/OpenAI) |
 | `utils/memory.py` | mem0 Memory 客户端封装 |
 
 ## 开发约定

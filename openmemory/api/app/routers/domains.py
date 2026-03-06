@@ -146,10 +146,17 @@ async def discover() -> Dict[str, Any]:
 async def analyze_uncategorized(req: LLMAnalyzeRequest) -> Dict[str, Any]:
     """
     Use LLM to analyze memories classified as 'General' or 'Work/Career'
-    and propose new domain groupings.
+    and propose new domain groupings. Supports both Ollama and OpenAI providers.
     """
     from app.database import SessionLocal
     from app.models import Memory, MemoryState
+    from app.utils.categorization import (
+        CATEGORIZATION_MODEL,
+        CATEGORIZATION_PROVIDER,
+        _get_ollama_base_url,
+    )
+    import httpx
+    import json
 
     db = SessionLocal()
     try:
@@ -173,11 +180,7 @@ async def analyze_uncategorized(req: LLMAnalyzeRequest) -> Dict[str, Any]:
 
         memory_texts = [m.content[:200] for m in general_memories]
 
-        from app.utils.categorization import _get_ollama_base_url, CATEGORIZATION_MODEL
-        import httpx
-        import json
-
-        prompt = f"""Analyze the following {len(memory_texts)} memory snippets and identify common themes/projects that could become named domains.
+        user_prompt = f"""Analyze the following {len(memory_texts)} memory snippets and identify common themes/projects that could become named domains.
 
 For each suggested domain, provide:
 - name: a short identifier (like "ProjectX/Feature")
@@ -190,25 +193,40 @@ Return JSON array of suggestions. Only suggest domains that have 3+ related memo
 Memories:
 """ + "\n".join(f"- {t}" for t in memory_texts[:50])
 
-        base_url = _get_ollama_base_url()
-        resp = httpx.post(
-            f"{base_url}/api/chat",
-            json={
-                "model": CATEGORIZATION_MODEL,
-                "messages": [
-                    {"role": "system", "content": "You analyze text and suggest domain groupings. Return ONLY valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
-                "stream": False,
-                "format": "json",
-                "options": {"num_predict": 1024, "temperature": 0.3},
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        content = resp.json()["message"]["content"]
-        result = json.loads(content)
+        system_msg = "You analyze text and suggest domain groupings. Return ONLY valid JSON."
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_prompt},
+        ]
 
+        if CATEGORIZATION_PROVIDER == "openai":
+            from openai import OpenAI
+            client = OpenAI()
+            model = CATEGORIZATION_MODEL or "gpt-4o-mini"
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            )
+            content = completion.choices[0].message.content
+        else:
+            base_url = _get_ollama_base_url()
+            resp = httpx.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": CATEGORIZATION_MODEL,
+                    "messages": messages,
+                    "stream": False,
+                    "format": "json",
+                    "options": {"num_predict": 1024, "temperature": 0.3},
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            content = resp.json()["message"]["content"]
+
+        result = json.loads(content)
         suggestions = result if isinstance(result, list) else result.get("suggestions", result.get("domains", []))
 
         return {

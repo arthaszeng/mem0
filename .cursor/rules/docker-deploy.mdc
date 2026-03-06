@@ -20,7 +20,7 @@ alwaysApply: false
 
 ```bash
 # 工作目录
-cd ~/Documents/workspace/arthas/mem0/openmemory
+cd <project-root>/openmemory
 
 # 重建并重启单个服务（修改代码后）
 docker compose up -d --build openmemory-mcp

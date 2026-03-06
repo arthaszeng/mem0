@@ -5,7 +5,7 @@ alwaysApply: true
 
 # mem0 项目总览
 
-本仓库是 Arthas 从 `mem0ai/mem0` fork 的个人版本，核心目标是**让不同 AI 客户端共享统一的记忆存储**。
+本仓库 fork 自 `mem0ai/mem0`，核心目标是**让不同 AI 客户端共享统一的记忆存储**。
 
 ## 目录结构
 
@@ -31,7 +31,7 @@ mem0/
 - **向量库**: Qdrant — collection `openmemory_768`
 - **元数据**: SQLite (`openmemory.db`)
 - **后端**: Python 3.12 + FastAPI
-- **MCP**: SSE 传输，Cursor 通过 `http://192.168.31.214:8765/api/mcp/sse` 连接
+- **MCP**: SSE 传输，Cursor 通过 `http://<host>:8765/api/mcp/sse` 连接
 
 ## 数据流
 

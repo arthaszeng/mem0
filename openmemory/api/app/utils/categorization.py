@@ -26,7 +26,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CATEGORIZATION_PROVIDER = os.getenv("CATEGORIZATION_PROVIDER", "ollama")
-CATEGORIZATION_MODEL = os.getenv("CATEGORIZATION_MODEL", "qwen2.5:7b")
+_DEFAULT_MODELS = {"ollama": "qwen2.5:7b", "openai": "gpt-4o-mini"}
+CATEGORIZATION_MODEL = os.getenv(
+    "CATEGORIZATION_MODEL",
+    _DEFAULT_MODELS.get(CATEGORIZATION_PROVIDER, "qwen2.5:7b"),
+)
 
 
 def _get_ollama_base_url() -> str:
