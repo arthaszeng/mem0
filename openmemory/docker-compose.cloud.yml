@@ -53,6 +53,26 @@ services:
       - openmemory-mcp
     restart: unless-stopped
 
+  langgraph-agent:
+    build:
+      context: ../langgraph-agent/
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+    image: mem0/langgraph-agent:latest
+    ports:
+      - "127.0.0.1:8766:8766"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://millionengine.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-qwen-plus}
+    depends_on:
+      - openmemory-mcp
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
 volumes:
   mem0_storage:
   openmemory_data:
