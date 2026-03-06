@@ -9,7 +9,9 @@ services:
 
   openmemory-mcp:
     image: mem0/openmemory-mcp
-    build: api/
+    build:
+      context: api/
+      dockerfile: Dockerfile.china
     env_file:
       - api/.env
     depends_on:
@@ -23,7 +25,7 @@ services:
   openmemory-ui:
     build:
       context: ui/
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.china
     image: mem0/openmemory-ui:latest
     ports:
       - "3001:3000"
