@@ -1,0 +1,39 @@
+services:
+  mem0_store:
+    image: qdrant/qdrant
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - mem0_storage:/mem0/storage
+    restart: unless-stopped
+
+  openmemory-mcp:
+    image: mem0/openmemory-mcp
+    build: api/
+    env_file:
+      - api/.env
+    depends_on:
+      - mem0_store
+    ports:
+      - "8765:8765"
+    volumes:
+      - openmemory_data:/data
+    restart: unless-stopped
+
+  openmemory-ui:
+    build:
+      context: ui/
+      dockerfile: Dockerfile
+    image: mem0/openmemory-ui:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8765}
+      - NEXT_PUBLIC_USER_ID=${USER}
+    depends_on:
+      - openmemory-mcp
+    restart: unless-stopped
+
+volumes:
+  mem0_storage:
+  openmemory_data:

@@ -247,21 +247,32 @@ def get_memory_client(custom_instructions: str = None):
                 if "openmemory" in json_config and "custom_instructions" in json_config["openmemory"]:
                     db_custom_instructions = json_config["openmemory"]["custom_instructions"]
 
+                force_openai = os.environ.get("FORCE_OPENAI", "").lower() in ("1", "true", "yes")
+
                 if "mem0" in json_config:
                     mem0_config = json_config["mem0"]
 
                     if "llm" in mem0_config and mem0_config["llm"] is not None:
-                        config["llm"] = mem0_config["llm"]
-                        if config["llm"].get("provider") == "ollama":
-                            config["llm"] = _fix_ollama_urls(config["llm"])
+                        if force_openai and mem0_config["llm"].get("provider") == "ollama":
+                            logger.info("FORCE_OPENAI set — ignoring DB Ollama LLM config, using OpenAI defaults")
+                        else:
+                            config["llm"] = mem0_config["llm"]
+                            if config["llm"].get("provider") == "ollama":
+                                config["llm"] = _fix_ollama_urls(config["llm"])
 
                     if "embedder" in mem0_config and mem0_config["embedder"] is not None:
-                        config["embedder"] = mem0_config["embedder"]
-                        if config["embedder"].get("provider") == "ollama":
-                            config["embedder"] = _fix_ollama_urls(config["embedder"])
+                        if force_openai and mem0_config["embedder"].get("provider") == "ollama":
+                            logger.info("FORCE_OPENAI set — ignoring DB Ollama embedder config, using OpenAI defaults")
+                        else:
+                            config["embedder"] = mem0_config["embedder"]
+                            if config["embedder"].get("provider") == "ollama":
+                                config["embedder"] = _fix_ollama_urls(config["embedder"])
 
                     if "vector_store" in mem0_config and mem0_config["vector_store"] is not None:
-                        config["vector_store"] = mem0_config["vector_store"]
+                        if force_openai and mem0_config["vector_store"].get("config", {}).get("embedding_model_dims") == 768:
+                            logger.info("FORCE_OPENAI set — ignoring DB 768-dim vector_store config, using 1536-dim defaults")
+                        else:
+                            config["vector_store"] = mem0_config["vector_store"]
 
             db.close()
 
