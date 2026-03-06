@@ -1,0 +1,27 @@
+---
+description: OpenMemory MCP 开发注意事项（记忆交互协议见全局规则 mem0-memory）
+globs: openmemory/api/**/*.py, openclaw/**/*.ts
+alwaysApply: false
+---
+
+# OpenMemory MCP 开发注意事项
+
+修改 MCP 相关代码时的关键约束。记忆交互协议见全局规则，这里只关注开发。
+
+## MCP 工具清单
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `add_memories` | `text: string` | 写入记忆，触发后台分类 |
+| `search_memory` | `query: string` | 语义搜索 |
+| `list_memories` | 无 | 列出全部（慎用） |
+| `delete_memories` | `memory_ids: list[str]` | 按 ID 删除 |
+| `delete_all_memories` | 无 | 清空全部（危险） |
+
+## 修改 MCP 工具时的检查清单
+
+- [ ] ADD/UPDATE 事件后触发 `categorize_memory_background`
+- [ ] MCP 中用 `threading.Thread(daemon=True)` 跑后台任务（无法用 BackgroundTasks）
+- [ ] REST API 对应端点同步修改，保持双通道一致
+- [ ] Qdrant payload 字段名使用 snake_case
+- [ ] 重建容器后提醒用户在 Cursor 中重连 MCP

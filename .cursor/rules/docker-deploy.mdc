@@ -1,0 +1,41 @@
+---
+description: Docker 部署与容器管理规范
+globs: openmemory/docker-compose.yml, openmemory/Dockerfile, openmemory/**/Dockerfile
+alwaysApply: false
+---
+
+# Docker 部署规范
+
+## 服务架构
+
+| 容器 | 镜像 | 端口 | 职责 |
+|------|------|------|------|
+| `mem0_store` | qdrant/qdrant | 6333 | 向量数据库 |
+| `openmemory-mcp` | 自建 | 8765 | API + MCP Server |
+| `openmemory-ui` | 自建 | 3001 | Web 管理界面 |
+
+宿主机上还运行 **Ollama**（port 11434），不在 Docker Compose 中。
+
+## 常用操作
+
+```bash
+# 工作目录
+cd <project-root>/openmemory
+
+# 重建并重启单个服务（修改代码后）
+docker compose up -d --build openmemory-mcp
+
+# 查看日志
+docker compose logs openmemory-mcp --tail=100 -f
+
+# 进入容器调试
+docker exec -it openmemory-openmemory-mcp-1 bash
+```
+
+## 注意事项
+
+- 修改 Python 代码后必须 `--build` 重建，镜像不会自动更新
+- 容器访问宿主机 Ollama 使用 `host.docker.internal:11434`
+- Qdrant 数据持久化在 Docker volume `mem0_store` 中
+- SQLite 数据库路径 `/data/openmemory.db`（容器内）
+- 重启容器后 Cursor 的 MCP SSE 连接会断开，需要手动重连

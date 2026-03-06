@@ -5,6 +5,7 @@ services:
       - "6333:6333"
     volumes:
       - mem0_storage:/mem0/storage
+
   openmemory-mcp:
     image: mem0/openmemory-mcp
     build: api/
@@ -20,17 +21,21 @@ services:
     volumes:
       - ./api:/usr/src/openmemory
     command: >
-      sh -c "uvicorn main:app --host 0.0.0.0 --port 8765 --reload --workers 4"
+      sh -c "uvicorn main:app --host 0.0.0.0 --port 8765 --reload"
+
   openmemory-ui:
     build:
       context: ui/
       dockerfile: Dockerfile
     image: mem0/openmemory-ui:latest
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NEXT_PUBLIC_API_URL=http://localhost:8765
       - NEXT_PUBLIC_USER_ID=${USER}
+    depends_on:
+      - openmemory-mcp
 
 volumes:
   mem0_storage:
+  ollama_data:

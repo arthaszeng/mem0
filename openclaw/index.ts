@@ -40,6 +40,8 @@ type Mem0Config = {
     llm?: { provider: string; config: Record<string, unknown> };
     historyDbPath?: string;
   };
+  // OpenMemory API for bidirectional sync (PostgreSQL registration)
+  openMemoryApiUrl?: string;
   // Shared
   userId: string;
   autoCapture: boolean;
@@ -204,105 +206,172 @@ class PlatformProvider implements Mem0Provider {
 
 // ============================================================================
 // Open-Source Provider (Self-hosted)
+//
+// Uses direct Qdrant + Ollama clients instead of mem0ai/oss to avoid the
+// sqlite3 native module dependency that crashes OpenClaw's gateway runtime.
+// Writes are delegated to the OpenMemory API which handles LLM extraction,
+// embedding, Qdrant upsert, and SQLite registration in one call.
 // ============================================================================
 
 class OSSProvider implements Mem0Provider {
-  private memory: any; // Memory from mem0ai/oss
+  private qdrantClient: any;
+  private collectionName: string;
+  private openMemoryApiUrl: string;
+  private ollamaUrl: string;
+  private embedModel: string;
   private initPromise: Promise<void> | null = null;
+  private ready = false;
 
   constructor(
     private readonly ossConfig?: Mem0Config["oss"],
     private readonly customPrompt?: string,
     private readonly resolvePath?: (p: string) => string,
-  ) { }
+    openMemoryApiUrl?: string,
+  ) {
+    this.collectionName =
+      (ossConfig?.vectorStore?.config as any)?.collectionName ?? "openmemory";
+    this.openMemoryApiUrl = openMemoryApiUrl ?? "http://localhost:8765";
 
-  private async ensureMemory(): Promise<void> {
-    if (this.memory) return;
+    const embCfg = ossConfig?.embedder?.config as Record<string, unknown> | undefined;
+    this.ollamaUrl = String(
+      embCfg?.url ?? embCfg?.ollama_base_url ?? "http://localhost:11434",
+    );
+    this.embedModel = String(embCfg?.model ?? "nomic-embed-text");
+  }
+
+  private async ensureReady(): Promise<void> {
+    if (this.ready) return;
     if (this.initPromise) return this.initPromise;
     this.initPromise = this._init();
     return this.initPromise;
   }
 
   private async _init(): Promise<void> {
-    const { Memory } = await import("mem0ai/oss");
+    const { QdrantClient } = await import("@qdrant/js-client-rest");
+    const vsCfg = this.ossConfig?.vectorStore?.config as Record<string, unknown> | undefined;
+    this.qdrantClient = new QdrantClient({
+      host: String(vsCfg?.host ?? "localhost"),
+      port: Number(vsCfg?.port ?? 6333),
+      checkCompatibility: false,
+    });
 
-    const config: Record<string, unknown> = { version: "v1.1" };
+    // Warm up: pull the embedding model so first real call is fast
+    try {
+      const pullResp = await fetch(`${this.ollamaUrl}/api/pull`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: this.embedModel, stream: false }),
+      });
+      if (pullResp.ok) console.log(`[INFO] Pulling model ${this.embedModel}...`);
+    } catch { /* Ollama may not support pull — ignore */ }
 
-    if (this.ossConfig?.embedder) config.embedder = this.ossConfig.embedder;
-    if (this.ossConfig?.vectorStore)
-      config.vectorStore = this.ossConfig.vectorStore;
-    if (this.ossConfig?.llm) config.llm = this.ossConfig.llm;
-
-    if (this.ossConfig?.historyDbPath) {
-      const dbPath = this.resolvePath
-        ? this.resolvePath(this.ossConfig.historyDbPath)
-        : this.ossConfig.historyDbPath;
-      config.historyDbPath = dbPath;
-    }
-
-    if (this.customPrompt) config.customPrompt = this.customPrompt;
-
-    this.memory = new Memory(config);
+    this.ready = true;
   }
 
+  /** Embed a text via the Ollama /api/embeddings endpoint. */
+  private async embed(text: string): Promise<number[]> {
+    const resp = await fetch(`${this.ollamaUrl}/api/embeddings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: this.embedModel, prompt: text }),
+    });
+    if (!resp.ok) throw new Error(`Ollama embed failed: ${resp.status}`);
+    const data = await resp.json() as { embedding: number[] };
+    return data.embedding;
+  }
+
+  private userFilter(userId: string): Record<string, unknown> {
+    return { must: [{ key: "user_id", match: { value: userId } }] };
+  }
+
+  /**
+   * Write memories via the OpenMemory API. The backend handles LLM fact
+   * extraction, dedup, embedding, Qdrant upsert, and SQLite registration
+   * in a single call — no need for the JS SDK's heavy Memory.add() pipeline.
+   */
   async add(
     messages: Array<{ role: string; content: string }>,
     options: AddOptions,
   ): Promise<AddResult> {
-    await this.ensureMemory();
-    // OSS SDK uses camelCase: userId/runId, not user_id/run_id
-    const addOpts: Record<string, unknown> = { userId: options.user_id };
-    if (options.run_id) addOpts.runId = options.run_id;
-    if (options.source) addOpts.source = options.source;
-    const result = await this.memory.add(messages, addOpts);
-    return normalizeAddResult(result);
+    await this.ensureReady();
+    const text = messages.map((m) => `${m.role}: ${m.content}`).join("\n");
+    try {
+      const resp = await fetch(`${this.openMemoryApiUrl}/api/v1/memories/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          user_id: options.user_id,
+          infer: true,
+          app: "openclaw",
+          metadata: { source_app: "openclaw", mcp_client: "openclaw" },
+        }),
+      });
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        console.error(`[mem0] add via API failed: ${resp.status} ${errText}`);
+        return { results: [] };
+      }
+      const body = await resp.json() as Record<string, unknown>;
+      return normalizeAddResult(body);
+    } catch (err) {
+      console.error(`[mem0] add via API error:`, err);
+      return { results: [] };
+    }
   }
 
   async search(query: string, options: SearchOptions): Promise<MemoryItem[]> {
-    await this.ensureMemory();
-    // OSS SDK uses camelCase: userId/runId, not user_id/run_id
-    const opts: Record<string, unknown> = { userId: options.user_id };
-    if (options.run_id) opts.runId = options.run_id;
-    if (options.limit != null) opts.limit = options.limit;
-    else if (options.top_k != null) opts.limit = options.top_k;
-    if (options.keyword_search != null) opts.keyword_search = options.keyword_search;
-    if (options.reranking != null) opts.reranking = options.reranking;
-    if (options.source) opts.source = options.source;
-    if (options.threshold != null) opts.threshold = options.threshold;
-
-    const results = await this.memory.search(query, opts);
-    const normalized = normalizeSearchResults(results);
-
-    // Filter results by threshold if specified (client-side filtering as fallback)
+    await this.ensureReady();
+    const limit = options.limit ?? options.top_k ?? 10;
+    const queryEmbedding = await this.embed(query);
+    const hits = await this.qdrantClient.search(this.collectionName, {
+      vector: queryEmbedding,
+      filter: this.userFilter(options.user_id),
+      limit,
+    });
+    const results: MemoryItem[] = (hits ?? []).map((h: any) => normalizeQdrantHit(h));
     if (options.threshold != null) {
-      return normalized.filter(item => (item.score ?? 0) >= options.threshold!);
+      return results.filter(item => (item.score ?? 0) >= options.threshold!);
     }
-
-    return normalized;
+    return results;
   }
 
   async get(memoryId: string): Promise<MemoryItem> {
-    await this.ensureMemory();
-    const result = await this.memory.get(memoryId);
-    return normalizeMemoryItem(result);
+    await this.ensureReady();
+    const points = await this.qdrantClient.getPoints(this.collectionName, {
+      ids: [memoryId],
+      with_payload: true,
+    });
+    if (!points?.length) throw new Error(`Memory ${memoryId} not found`);
+    return normalizeQdrantHit(points[0]);
   }
 
   async getAll(options: ListOptions): Promise<MemoryItem[]> {
-    await this.ensureMemory();
-    // OSS SDK uses camelCase: userId/runId, not user_id/run_id
-    const getAllOpts: Record<string, unknown> = { userId: options.user_id };
-    if (options.run_id) getAllOpts.runId = options.run_id;
-    if (options.source) getAllOpts.source = options.source;
-    const results = await this.memory.getAll(getAllOpts);
-    if (Array.isArray(results)) return results.map(normalizeMemoryItem);
-    if (results?.results && Array.isArray(results.results))
-      return results.results.map(normalizeMemoryItem);
-    return [];
+    await this.ensureReady();
+    const response = await this.qdrantClient.scroll(this.collectionName, {
+      filter: this.userFilter(options.user_id),
+      limit: options.page_size ?? 100,
+      with_payload: true,
+      with_vectors: false,
+    });
+    return (response?.points ?? []).map((p: any) => normalizeQdrantHit(p));
   }
 
   async delete(memoryId: string): Promise<void> {
-    await this.ensureMemory();
-    await this.memory.delete(memoryId);
+    await this.ensureReady();
+    try {
+      await this.qdrantClient.delete(this.collectionName, {
+        points: [memoryId],
+      });
+    } catch { /* best-effort */ }
+    // Also remove from OpenMemory SQLite
+    try {
+      await fetch(`${this.openMemoryApiUrl}/api/v1/memories/${memoryId}/`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: "default" }),
+      });
+    } catch { /* best-effort */ }
   }
 }
 
@@ -310,11 +379,25 @@ class OSSProvider implements Mem0Provider {
 // Result Normalizers
 // ============================================================================
 
+/** Normalize a raw Qdrant search/scroll hit into a MemoryItem. */
+function normalizeQdrantHit(hit: any): MemoryItem {
+  const p = hit.payload ?? {};
+  return {
+    id: String(hit.id ?? ""),
+    memory: p.data ?? "",
+    user_id: p.user_id ?? p.userId,
+    score: hit.score,
+    categories: p.categories,
+    metadata: p.metadata,
+    created_at: p.created_at ?? p.createdAt,
+    updated_at: p.updated_at ?? p.updatedAt,
+  };
+}
+
 function normalizeMemoryItem(raw: any): MemoryItem {
   return {
     id: raw.id ?? raw.memory_id ?? "",
     memory: raw.memory ?? raw.text ?? raw.content ?? "",
-    // Handle both platform (user_id, created_at) and OSS (userId, createdAt) field names
     user_id: raw.user_id ?? raw.userId,
     score: raw.score,
     categories: raw.categories,
@@ -503,6 +586,7 @@ const ALLOWED_KEYS = [
   "searchThreshold",
   "topK",
   "oss",
+  "openMemoryApiUrl",
 ];
 
 function assertAllowedKeys(
@@ -570,9 +654,13 @@ const mem0ConfigSchema = {
           : DEFAULT_CUSTOM_INSTRUCTIONS,
       enableGraph: cfg.enableGraph === true,
       searchThreshold:
-        typeof cfg.searchThreshold === "number" ? cfg.searchThreshold : 0.5,
+        typeof cfg.searchThreshold === "number" ? cfg.searchThreshold : 0.1,
       topK: typeof cfg.topK === "number" ? cfg.topK : 5,
       oss: ossConfig,
+      openMemoryApiUrl:
+        typeof cfg.openMemoryApiUrl === "string"
+          ? cfg.openMemoryApiUrl
+          : "http://localhost:8765",
     };
   },
 };
@@ -587,7 +675,7 @@ function createProvider(
 ): Mem0Provider {
   if (cfg.mode === "open-source") {
     return new OSSProvider(cfg.oss, cfg.customPrompt, (p) =>
-      api.resolvePath(p),
+      api.resolvePath(p), cfg.openMemoryApiUrl,
     );
   }
 
@@ -1366,19 +1454,19 @@ const memoryPlugin = {
           if (formattedMessages.length === 0) return;
 
           const addOpts = buildAddOptions(undefined, currentSessionId);
-          const result = await provider.add(
-            formattedMessages,
-            addOpts,
-          );
-
-          const capturedCount = result.results?.length ?? 0;
-          if (capturedCount > 0) {
-            api.logger.info(
-              `openclaw-mem0: auto-captured ${capturedCount} memories`,
-            );
-          }
+          // Fire-and-forget: don't block the agent response
+          provider.add(formattedMessages, addOpts).then((result) => {
+            const capturedCount = result.results?.length ?? 0;
+            if (capturedCount > 0) {
+              api.logger.info(
+                `openclaw-mem0: auto-captured ${capturedCount} memories`,
+              );
+            }
+          }).catch((err) => {
+            api.logger.warn(`openclaw-mem0: capture failed: ${String(err)}`);
+          });
         } catch (err) {
-          api.logger.warn(`openclaw-mem0: capture failed: ${String(err)}`);
+          api.logger.warn(`openclaw-mem0: capture setup failed: ${String(err)}`);
         }
       });
     }

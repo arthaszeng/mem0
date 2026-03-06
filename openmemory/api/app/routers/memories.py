@@ -17,12 +17,14 @@ from app.models import (
 from app.schemas import MemoryResponse
 from app.utils.memory import get_memory_client
 from app.utils.permissions import check_memory_access_permissions
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi_pagination import Page, Params
 from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
+from app.utils.categorization import match_domain_by_keywords
+from app.utils.sensitive import sanitize_text
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memories"])
 
@@ -123,13 +125,22 @@ async def list_memories(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Build base query
-    query = db.query(Memory).filter(
+    base_filters = [
         Memory.user_id == user.id,
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
-        Memory.content.ilike(f"%{search_query}%") if search_query else True
-    )
+    ]
+
+    if search_query:
+        matched_domain = match_domain_by_keywords(search_query)
+        search_conditions = [Memory.content.ilike(f"%{search_query}%")]
+        if matched_domain:
+            search_conditions.append(
+                Memory.metadata_.op("->>")("domain") == matched_domain
+            )
+        base_filters.append(or_(*search_conditions))
+
+    query = db.query(Memory).filter(*base_filters)
 
     # Apply filters
     if app_id:
@@ -217,11 +228,148 @@ class CreateMemoryRequest(BaseModel):
     app: str = "openmemory"
 
 
+class RegisterMemoryRequest(BaseModel):
+    memory_id: str
+    content: str
+    user_id: str
+    app: str = "openclaw"
+    metadata: dict = {}
+
+
+class RegisterBatchRequest(BaseModel):
+    memories: List[RegisterMemoryRequest]
+
+
+@router.post("/register")
+async def register_external_memory(
+    request: RegisterMemoryRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Register a memory that already exists in Qdrant into PostgreSQL.
+    Used by external clients (e.g. OpenClaw JS SDK) that write to Qdrant
+    directly but need the memory visible in the OpenMemory UI."""
+    from app.models import categorize_memory_background
+
+    user = db.query(User).filter(User.user_id == request.user_id).first()
+    if not user:
+        user = User(user_id=request.user_id)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    app_obj = db.query(App).filter(App.name == request.app, App.owner_id == user.id).first()
+    if not app_obj:
+        app_obj = App(name=request.app, owner_id=user.id)
+        db.add(app_obj)
+        db.commit()
+        db.refresh(app_obj)
+
+    memory_id = UUID(request.memory_id)
+    existing = db.query(Memory).filter(Memory.id == memory_id).first()
+    if existing:
+        existing.content = request.content
+        existing.state = MemoryState.active
+        db.commit()
+        return {"status": "updated", "id": str(memory_id)}
+
+    memory = Memory(
+        id=memory_id,
+        user_id=user.id,
+        app_id=app_obj.id,
+        content=request.content,
+        metadata_=request.metadata,
+        state=MemoryState.active,
+    )
+    db.add(memory)
+    db.commit()
+
+    background_tasks.add_task(categorize_memory_background, memory_id, request.content)
+    return {"status": "created", "id": str(memory_id)}
+
+
+@router.post("/register/batch")
+async def register_external_memories_batch(
+    request: RegisterBatchRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Batch register multiple Qdrant-only memories into PostgreSQL."""
+    from app.models import categorize_memory_background
+
+    results = []
+    for item in request.memories:
+        user = db.query(User).filter(User.user_id == item.user_id).first()
+        if not user:
+            user = User(user_id=item.user_id)
+            db.add(user)
+            db.flush()
+
+        app_obj = db.query(App).filter(App.name == item.app, App.owner_id == user.id).first()
+        if not app_obj:
+            app_obj = App(name=item.app, owner_id=user.id)
+            db.add(app_obj)
+            db.flush()
+
+        memory_id = UUID(item.memory_id)
+        existing = db.query(Memory).filter(Memory.id == memory_id).first()
+        if existing:
+            existing.content = item.content
+            existing.state = MemoryState.active
+            results.append({"status": "updated", "id": str(memory_id)})
+        else:
+            memory = Memory(
+                id=memory_id,
+                user_id=user.id,
+                app_id=app_obj.id,
+                content=item.content,
+                metadata_=item.metadata,
+                state=MemoryState.active,
+            )
+            db.add(memory)
+            results.append({"status": "created", "id": str(memory_id)})
+            background_tasks.add_task(categorize_memory_background, memory_id, item.content)
+
+    db.commit()
+    return {"results": results}
+
+
+@router.post("/backfill-categories")
+async def backfill_categories(
+    user_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Trigger categorization for all memories that have no categories yet."""
+    from app.models import categorize_memory_background
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    uncategorized = (
+        db.query(Memory)
+        .outerjoin(Memory.categories)
+        .filter(
+            Memory.user_id == user.id,
+            Memory.state == MemoryState.active,
+            Category.id.is_(None),
+        )
+        .all()
+    )
+
+    for mem in uncategorized:
+        background_tasks.add_task(categorize_memory_background, mem.id, mem.content)
+
+    return {"scheduled": len(uncategorized), "memory_ids": [str(m.id) for m in uncategorized]}
+
+
 # Create new memory
 @router.post("/")
 async def create_memory(
     request: CreateMemoryRequest,
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     user = db.query(User).filter(User.user_id == request.user_id).first()
     if not user:
@@ -239,25 +387,25 @@ async def create_memory(
     if not app_obj.is_active:
         raise HTTPException(status_code=403, detail=f"App {request.app} is currently paused on OpenMemory. Cannot create new memories.")
 
-    # Log what we're about to do
+    from app.models import categorize_memory_background
+
     logging.info(f"Creating memory for user_id: {request.user_id} with app: {request.app}")
-    
-    # Try to get memory client safely
+
+    safe_text = sanitize_text(request.text)
+
     try:
         memory_client = get_memory_client()
         if not memory_client:
             raise Exception("Memory client is not available")
     except Exception as client_error:
         logging.warning(f"Memory client unavailable: {client_error}. Creating memory in database only.")
-        # Return a json response with the error
         return {
             "error": str(client_error)
         }
 
-    # Try to save to Qdrant via memory_client
     try:
         qdrant_response = memory_client.add(
-            request.text,
+            safe_text,
             user_id=request.user_id,  # Use string user_id to match search
             metadata={
                 "source_app": "openmemory",
@@ -271,25 +419,20 @@ async def create_memory(
         
         # Process Qdrant response
         if isinstance(qdrant_response, dict) and 'results' in qdrant_response:
-            created_memories = []
-            
+            changed_memories = []
+
             for result in qdrant_response['results']:
-                if result['event'] == 'ADD':
-                    # Get the Qdrant-generated ID
-                    memory_id = UUID(result['id'])
-                    
-                    # Check if memory already exists
-                    existing_memory = db.query(Memory).filter(Memory.id == memory_id).first()
-                    
+                memory_id = UUID(result['id'])
+                existing_memory = db.query(Memory).filter(Memory.id == memory_id).first()
+
+                if result['event'] in ('ADD', 'UPDATE'):
                     if existing_memory:
-                        # Update existing memory
                         existing_memory.state = MemoryState.active
                         existing_memory.content = result['memory']
                         memory = existing_memory
                     else:
-                        # Create memory with the EXACT SAME ID from Qdrant
                         memory = Memory(
-                            id=memory_id,  # Use the same ID that Qdrant generated
+                            id=memory_id,
                             user_id=user.id,
                             app_id=app_obj.id,
                             content=result['memory'],
@@ -297,27 +440,29 @@ async def create_memory(
                             state=MemoryState.active
                         )
                         db.add(memory)
-                    
-                    # Create history entry
-                    history = MemoryStatusHistory(
-                        memory_id=memory_id,
-                        changed_by=user.id,
-                        old_state=MemoryState.deleted if existing_memory else MemoryState.deleted,
-                        new_state=MemoryState.active
-                    )
-                    db.add(history)
-                    
-                    created_memories.append(memory)
-            
-            # Commit all changes at once
-            if created_memories:
+
+                    if result['event'] == 'ADD':
+                        history = MemoryStatusHistory(
+                            memory_id=memory_id,
+                            changed_by=user.id,
+                            old_state=MemoryState.deleted,
+                            new_state=MemoryState.active
+                        )
+                        db.add(history)
+
+                    changed_memories.append(memory)
+
+            if changed_memories:
                 db.commit()
-                for memory in created_memories:
+                for memory in changed_memories:
                     db.refresh(memory)
-                
-                # Return the first memory (for API compatibility)
-                # but all memories are now saved to the database
-                return created_memories[0]
+
+                for memory in changed_memories:
+                    background_tasks.add_task(
+                        categorize_memory_background, memory.id, memory.content
+                    )
+
+                return changed_memories[0]
     except Exception as qdrant_error:
         logging.warning(f"Qdrant operation failed: {qdrant_error}.")
         # Return a json response with the error
@@ -561,9 +706,15 @@ async def filter_memories(
     if not request.show_archived:
         query = query.filter(Memory.state != MemoryState.archived)
 
-    # Apply search filter
+    # Apply search filter with domain-aware expansion
     if request.search_query:
-        query = query.filter(Memory.content.ilike(f"%{request.search_query}%"))
+        search_conditions = [Memory.content.ilike(f"%{request.search_query}%")]
+        matched_domain = match_domain_by_keywords(request.search_query)
+        if matched_domain:
+            search_conditions.append(
+                Memory.metadata_.op("->>")("domain") == matched_domain
+            )
+        query = query.filter(or_(*search_conditions))
 
     # Apply app filter
     if request.app_ids:

@@ -15,6 +15,7 @@ Key features:
 - Environment variable parsing for API keys
 """
 
+import asyncio
 import contextvars
 import datetime
 import json
@@ -25,18 +26,144 @@ from app.database import SessionLocal
 from app.models import Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
 from app.utils.db import get_user_and_app
 from app.utils.memory import get_memory_client
+from app.utils.categorization import match_domain_by_keywords
+from app.utils.domain_registry import add_domain, auto_discover_domains, get_domains
 from app.utils.permissions import check_memory_access_permissions
+from app.utils.sensitive import sanitize_text
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 # Load environment variables
 load_dotenv()
 
 # Initialize MCP
 mcp = FastMCP("mem0-mcp-server")
+
+# ---------------------------------------------------------------------------
+# Background memory-write queue: add_memories enqueues and returns immediately;
+# a single async worker drains the queue, running the heavy mem0 add() in a
+# thread so it never blocks the event loop.
+# ---------------------------------------------------------------------------
+_memory_task_queue: asyncio.Queue | None = None
+
+
+def _get_queue() -> asyncio.Queue:
+    global _memory_task_queue
+    if _memory_task_queue is None:
+        _memory_task_queue = asyncio.Queue()
+    return _memory_task_queue
+
+
+def _run_categorization_in_background(memory_id: uuid.UUID, content: str):
+    import threading
+    from app.models import categorize_memory_background
+
+    t = threading.Thread(
+        target=categorize_memory_background,
+        args=(memory_id, content),
+        daemon=True,
+    )
+    t.start()
+
+
+async def _memory_write_worker():
+    """Drain the queue and process memory writes one-by-one in a thread."""
+    q = _get_queue()
+    while True:
+        task = await q.get()
+        try:
+            uid, client_name, text = task
+            memory_client = get_memory_client_safe()
+            if not memory_client:
+                logging.warning("Memory worker: client unavailable, dropping task")
+                continue
+
+            text = sanitize_text(text)
+
+            response = await asyncio.to_thread(
+                memory_client.add, text,
+                user_id=uid,
+                metadata={"source_app": "openmemory", "mcp_client": client_name},
+            )
+
+            db = SessionLocal()
+            try:
+                user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+                memories_to_categorize: list[tuple[uuid.UUID, str]] = []
+
+                if isinstance(response, dict) and "results" in response:
+                    for result in response["results"]:
+                        memory_id = uuid.UUID(result["id"])
+                        memory = db.query(Memory).filter(Memory.id == memory_id).first()
+
+                        if result["event"] == "ADD":
+                            if not memory:
+                                memory = Memory(
+                                    id=memory_id,
+                                    user_id=user.id,
+                                    app_id=app.id,
+                                    content=result["memory"],
+                                    state=MemoryState.active,
+                                )
+                                db.add(memory)
+                            else:
+                                memory.state = MemoryState.active
+                                memory.content = result["memory"]
+
+                            db.add(MemoryStatusHistory(
+                                memory_id=memory_id,
+                                changed_by=user.id,
+                                old_state=MemoryState.deleted,
+                                new_state=MemoryState.active,
+                            ))
+                            memories_to_categorize.append((memory_id, result["memory"]))
+
+                        elif result["event"] == "UPDATE":
+                            if memory:
+                                memory.content = result["memory"]
+                                memory.updated_at = datetime.datetime.now(datetime.UTC)
+                            else:
+                                memory = Memory(
+                                    id=memory_id,
+                                    user_id=user.id,
+                                    app_id=app.id,
+                                    content=result["memory"],
+                                    state=MemoryState.active,
+                                )
+                                db.add(memory)
+                            memories_to_categorize.append((memory_id, result["memory"]))
+
+                        elif result["event"] == "DELETE":
+                            if memory:
+                                memory.state = MemoryState.deleted
+                                memory.deleted_at = datetime.datetime.now(datetime.UTC)
+                                db.add(MemoryStatusHistory(
+                                    memory_id=memory_id,
+                                    changed_by=user.id,
+                                    old_state=MemoryState.active,
+                                    new_state=MemoryState.deleted,
+                                ))
+
+                    db.commit()
+
+                for mid, content in memories_to_categorize:
+                    try:
+                        _run_categorization_in_background(mid, content)
+                    except Exception as cat_err:
+                        logging.warning(f"Categorization schedule failed for {mid}: {cat_err}")
+
+                logging.info(f"Memory worker processed write for user={uid}: {len(response.get('results', []))} results")
+            finally:
+                db.close()
+
+        except Exception as e:
+            logging.exception(f"Memory worker error: {e}")
+        finally:
+            q.task_done()
 
 # Don't initialize memory client at import time - do it lazily when needed
 def get_memory_client_safe():
@@ -67,7 +194,6 @@ async def add_memories(text: str) -> str:
     if not client_name:
         return "Error: client_name not provided"
 
-    # Get memory client safely
     memory_client = get_memory_client_safe()
     if not memory_client:
         return "Error: Memory system is currently unavailable. Please try again later."
@@ -75,70 +201,22 @@ async def add_memories(text: str) -> str:
     try:
         db = SessionLocal()
         try:
-            # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
-
-            # Check if app is active
             if not app.is_active:
                 return f"Error: App {app.name} is currently paused on OpenMemory. Cannot create new memories."
-
-            response = memory_client.add(text,
-                                         user_id=uid,
-                                         metadata={
-                                            "source_app": "openmemory",
-                                            "mcp_client": client_name,
-                                        })
-
-            # Process the response and update database
-            if isinstance(response, dict) and 'results' in response:
-                for result in response['results']:
-                    memory_id = uuid.UUID(result['id'])
-                    memory = db.query(Memory).filter(Memory.id == memory_id).first()
-
-                    if result['event'] == 'ADD':
-                        if not memory:
-                            memory = Memory(
-                                id=memory_id,
-                                user_id=user.id,
-                                app_id=app.id,
-                                content=result['memory'],
-                                state=MemoryState.active
-                            )
-                            db.add(memory)
-                        else:
-                            memory.state = MemoryState.active
-                            memory.content = result['memory']
-
-                        # Create history entry
-                        history = MemoryStatusHistory(
-                            memory_id=memory_id,
-                            changed_by=user.id,
-                            old_state=MemoryState.deleted if memory else None,
-                            new_state=MemoryState.active
-                        )
-                        db.add(history)
-
-                    elif result['event'] == 'DELETE':
-                        if memory:
-                            memory.state = MemoryState.deleted
-                            memory.deleted_at = datetime.datetime.now(datetime.UTC)
-                            # Create history entry
-                            history = MemoryStatusHistory(
-                                memory_id=memory_id,
-                                changed_by=user.id,
-                                old_state=MemoryState.active,
-                                new_state=MemoryState.deleted
-                            )
-                            db.add(history)
-
-                db.commit()
-
-            return json.dumps(response)
         finally:
             db.close()
     except Exception as e:
-        logging.exception(f"Error adding to memory: {e}")
-        return f"Error adding to memory: {e}"
+        logging.exception(f"Error validating user/app: {e}")
+        return f"Error: {e}"
+
+    q = _get_queue()
+    await q.put((uid, client_name, text))
+    pending = q.qsize()
+    return json.dumps({
+        "status": "queued",
+        "message": f"Memory is being processed in background (queue depth: {pending})",
+    })
 
 
 @mcp.tool(description="Search through stored memories. This method is called EVERYTIME the user asks anything.")
@@ -150,7 +228,6 @@ async def search_memory(query: str) -> str:
     if not client_name:
         return "Error: client_name not provided"
 
-    # Get memory client safely
     memory_client = get_memory_client_safe()
     if not memory_client:
         return "Error: Memory system is currently unavailable. Please try again later."
@@ -158,46 +235,78 @@ async def search_memory(query: str) -> str:
     try:
         db = SessionLocal()
         try:
-            # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
 
-            # Get accessible memory IDs based on ACL
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
-            filters = {
-                "user_id": uid
-            }
-
-            embeddings = memory_client.embedding_model.embed(query, "search")
-
-            hits = memory_client.vector_store.search(
-                query=query, 
-                vectors=embeddings, 
-                limit=10, 
-                filters=filters,
+            query_filter = Filter(
+                must=[FieldCondition(key="user_id", match=MatchValue(value=uid))]
             )
+
+            def _do_search():
+                emb = memory_client.embedding_model.embed(query, "search")
+                return memory_client.vector_store.client.query_points(
+                    collection_name=memory_client.vector_store.collection_name,
+                    query=emb,
+                    query_filter=query_filter,
+                    limit=10,
+                ).points
+
+            hits = await asyncio.to_thread(_do_search)
 
             allowed = set(str(mid) for mid in accessible_memory_ids) if accessible_memory_ids else None
 
             results = []
+            seen_ids = set()
             for h in hits:
-                # All vector db search functions return OutputData class
-                id, score, payload = h.id, h.score, h.payload
-                if allowed and h.id is None or h.id not in allowed: 
+                id, score, payload = str(h.id), h.score, h.payload or {}
+                if allowed and (id is None or id not in allowed):
                     continue
-                
+                seen_ids.add(id)
                 results.append({
-                    "id": id, 
-                    "memory": payload.get("data"), 
+                    "id": id,
+                    "memory": payload.get("data"),
                     "hash": payload.get("hash"),
-                    "created_at": payload.get("created_at"), 
-                    "updated_at": payload.get("updated_at"), 
+                    "created_at": payload.get("created_at"),
+                    "updated_at": payload.get("updated_at"),
                     "score": score,
                 })
 
-            for r in results: 
-                if r.get("id"): 
+            # --- Domain-augmented search ---
+            matched_domain = match_domain_by_keywords(query)
+            if matched_domain:
+                domain_memories = (
+                    db.query(Memory)
+                    .filter(
+                        Memory.user_id == user.id,
+                        Memory.state == MemoryState.active,
+                        Memory.metadata_.op("->>")(  # JSON extract "domain"
+                            "domain"
+                        ) == matched_domain,
+                    )
+                    .order_by(Memory.updated_at.desc())
+                    .limit(20)
+                    .all()
+                )
+                for dm in domain_memories:
+                    mid = str(dm.id)
+                    if mid in seen_ids:
+                        continue
+                    if allowed and mid not in allowed:
+                        continue
+                    seen_ids.add(mid)
+                    results.append({
+                        "id": mid,
+                        "memory": dm.content,
+                        "hash": None,
+                        "created_at": dm.created_at.isoformat() if dm.created_at else None,
+                        "updated_at": dm.updated_at.isoformat() if dm.updated_at else None,
+                        "score": 0.5,  # domain-match baseline score
+                    })
+
+            for r in results:
+                if r.get("id"):
                     access_log = MemoryAccessLog(
                         memory_id=uuid.UUID(r["id"]),
                         app_id=app.id,
@@ -239,8 +348,7 @@ async def list_memories() -> str:
             # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
 
-            # Get all memories
-            memories = memory_client.get_all(user_id=uid)
+            memories = await asyncio.to_thread(memory_client.get_all, user_id=uid)
             filtered_memories = []
 
             # Filter memories based on permissions
@@ -319,10 +427,9 @@ async def delete_memories(memory_ids: list[str]) -> str:
             if not ids_to_delete:
                 return "Error: No accessible memories found with provided IDs"
 
-            # Delete from vector store
             for memory_id in ids_to_delete:
                 try:
-                    memory_client.delete(str(memory_id))
+                    await asyncio.to_thread(memory_client.delete, str(memory_id))
                 except Exception as delete_error:
                     logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
@@ -385,10 +492,9 @@ async def delete_all_memories() -> str:
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
-            # delete the accessible memories only
             for memory_id in accessible_memory_ids:
                 try:
-                    memory_client.delete(str(memory_id))
+                    await asyncio.to_thread(memory_client.delete, str(memory_id))
                 except Exception as delete_error:
                     logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
@@ -425,6 +531,54 @@ async def delete_all_memories() -> str:
     except Exception as e:
         logging.exception(f"Error deleting memories: {e}")
         return f"Error deleting memories: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Domain management tools (does NOT change existing tool interfaces)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="List all registered memory domains. Use this to see what project/domain categories are available for memory classification.")
+async def list_domains() -> str:
+    try:
+        domains = get_domains()
+        lines = [f"Registered domains ({len(domains)}):"]
+        for name, info in domains.items():
+            aliases_str = ", ".join(info.get("aliases", [])[:5])
+            kw_str = ", ".join(info.get("keywords", [])[:5])
+            lines.append(f"  - {name} ({info.get('display', '')})")
+            lines.append(f"    aliases: {aliases_str}")
+            lines.append(f"    keywords: {kw_str}...")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error listing domains: {e}"
+
+
+@mcp.tool(description="Add or update a memory domain. Provide a name (like 'ProjectX/Feature'), display name (Chinese), comma-separated aliases, and comma-separated keywords.")
+async def manage_domain(name: str, display: str, aliases: str, keywords: str) -> str:
+    try:
+        alias_list = [a.strip() for a in aliases.split(",") if a.strip()]
+        kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+        add_domain(name=name, display=display, aliases=alias_list, keywords=kw_list)
+        return f"Domain '{name}' ({display}) saved with {len(alias_list)} aliases and {len(kw_list)} keywords. Cache invalidated."
+    except Exception as e:
+        return f"Error managing domain: {e}"
+
+
+@mcp.tool(description="Show domain candidates discovered automatically from memories. These are domains the LLM suggested that aren't in the registry yet.")
+async def show_domain_candidates() -> str:
+    try:
+        suggestions = auto_discover_domains()
+        if not suggestions:
+            return "No domain candidates found yet. Candidates are recorded when the LLM suggests unknown domains during memory classification."
+        lines = [f"Domain candidates ({len(suggestions)}):"]
+        for s in suggestions:
+            status = "AUTO-PROMOTABLE" if s["auto_promotable"] else "needs more data"
+            lines.append(f"  - '{s['candidate']}' (count={s['count']}, {status})")
+            if s.get("snippets"):
+                lines.append(f"    sample: {s['snippets'][0][:100]}...")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error showing candidates: {e}"
 
 
 @mcp_router.get("/{client_name}/sse/{user_id}")
@@ -488,5 +642,9 @@ def setup_mcp_server(app: FastAPI):
     """Setup MCP server with the FastAPI application"""
     mcp._mcp_server.name = "mem0-mcp-server"
 
-    # Include MCP router in the FastAPI app
+    @app.on_event("startup")
+    async def _start_memory_worker():
+        asyncio.create_task(_memory_write_worker())
+        logging.info("Memory write worker started")
+
     app.include_router(mcp_router)
