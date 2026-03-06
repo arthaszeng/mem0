@@ -13,8 +13,6 @@ import os
 import sys
 import uuid
 
-os.environ.setdefault("DATABASE_URL", "")
-
 from app.database import SessionLocal, engine, Base
 from app.models import User, App, Memory, MemoryState, Category
 
