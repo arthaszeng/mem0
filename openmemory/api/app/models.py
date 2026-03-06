@@ -1,10 +1,10 @@
 import datetime
 import enum
+import logging
 import uuid
 
 import sqlalchemy as sa
 from app.database import Base
-from app.utils.categorization import get_categories_for_memory
 from sqlalchemy import (
     JSON,
     UUID,
@@ -17,9 +17,10 @@ from sqlalchemy import (
     Integer,
     String,
     Table,
-    event,
 )
 from sqlalchemy.orm import Session, relationship
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_utc_time():
@@ -187,13 +188,17 @@ class MemoryAccessLog(Base):
         Index('idx_access_app_time', 'app_id', 'accessed_at'),
     )
 
-def categorize_memory(memory: Memory, db: Session) -> None:
-    """Categorize a memory using OpenAI and store the categories in the database."""
-    try:
-        # Get categories from OpenAI
-        categories = get_categories_for_memory(memory.content)
+def categorize_memory_background(memory_id: uuid.UUID, content: str) -> None:
+    """Categorize a memory in the background. Safe to call from BackgroundTasks."""
+    from app.database import SessionLocal
+    from app.utils.categorization import get_categories_for_memory
 
-        # Get or create categories in the database
+    db = SessionLocal()
+    try:
+        categories = get_categories_for_memory(content)
+        if not categories:
+            return
+
         for category_name in categories:
             category = db.query(Category).filter(Category.name == category_name).first()
             if not category:
@@ -202,42 +207,27 @@ def categorize_memory(memory: Memory, db: Session) -> None:
                     description=f"Automatically created category for {category_name}"
                 )
                 db.add(category)
-                db.flush()  # Flush to get the category ID
+                db.flush()
 
-            # Check if the memory-category association already exists
             existing = db.execute(
                 memory_categories.select().where(
-                    (memory_categories.c.memory_id == memory.id) &
+                    (memory_categories.c.memory_id == memory_id) &
                     (memory_categories.c.category_id == category.id)
                 )
             ).first()
 
             if not existing:
-                # Create the association
                 db.execute(
                     memory_categories.insert().values(
-                        memory_id=memory.id,
+                        memory_id=memory_id,
                         category_id=category.id
                     )
                 )
 
         db.commit()
+        logger.info(f"Categorized memory {memory_id}: {categories}")
     except Exception as e:
         db.rollback()
-        print(f"Error categorizing memory: {e}")
-
-
-@event.listens_for(Memory, 'after_insert')
-def after_memory_insert(mapper, connection, target):
-    """Trigger categorization after a memory is inserted."""
-    db = Session(bind=connection)
-    categorize_memory(target, db)
-    db.close()
-
-
-@event.listens_for(Memory, 'after_update')
-def after_memory_update(mapper, connection, target):
-    """Trigger categorization after a memory is updated."""
-    db = Session(bind=connection)
-    categorize_memory(target, db)
-    db.close()
+        logger.error(f"Background categorization failed for {memory_id}: {e}")
+    finally:
+        db.close()

@@ -40,6 +40,8 @@ type Mem0Config = {
     llm?: { provider: string; config: Record<string, unknown> };
     historyDbPath?: string;
   };
+  // OpenMemory API for bidirectional sync (PostgreSQL registration)
+  openMemoryApiUrl?: string;
   // Shared
   userId: string;
   autoCapture: boolean;
@@ -208,13 +210,22 @@ class PlatformProvider implements Mem0Provider {
 
 class OSSProvider implements Mem0Provider {
   private memory: any; // Memory from mem0ai/oss
+  private qdrantClient: any; // Direct Qdrant client for cross-SDK compatible queries
+  private embedder: any; // Embedder from mem0ai for vectorizing queries
+  private collectionName: string;
+  private openMemoryApiUrl: string;
   private initPromise: Promise<void> | null = null;
 
   constructor(
     private readonly ossConfig?: Mem0Config["oss"],
     private readonly customPrompt?: string,
     private readonly resolvePath?: (p: string) => string,
-  ) { }
+    openMemoryApiUrl?: string,
+  ) {
+    this.collectionName =
+      (ossConfig?.vectorStore?.config as any)?.collectionName ?? "openmemory";
+    this.openMemoryApiUrl = openMemoryApiUrl ?? "http://localhost:8765";
+  }
 
   private async ensureMemory(): Promise<void> {
     if (this.memory) return;
@@ -243,6 +254,13 @@ class OSSProvider implements Mem0Provider {
     if (this.customPrompt) config.customPrompt = this.customPrompt;
 
     this.memory = new Memory(config);
+    this.qdrantClient = (this.memory as any).vectorStore?.client;
+    this.embedder = (this.memory as any).embedder;
+  }
+
+  /** Build a Qdrant filter on the canonical snake_case user_id field. */
+  private userFilter(userId: string): Record<string, unknown> {
+    return { must: [{ key: "user_id", match: { value: userId } }] };
   }
 
   async add(
@@ -250,35 +268,86 @@ class OSSProvider implements Mem0Provider {
     options: AddOptions,
   ): Promise<AddResult> {
     await this.ensureMemory();
-    // OSS SDK uses camelCase: userId/runId, not user_id/run_id
-    const addOpts: Record<string, unknown> = { userId: options.user_id };
+    const addOpts: Record<string, unknown> = {
+      userId: options.user_id,
+      metadata: {
+        user_id: options.user_id,
+        source_app: "openclaw",
+        mcp_client: "openclaw",
+      },
+    };
     if (options.run_id) addOpts.runId = options.run_id;
     if (options.source) addOpts.source = options.source;
     const result = await this.memory.add(messages, addOpts);
-    return normalizeAddResult(result);
+    const normalized = normalizeAddResult(result);
+
+    const addedItems = normalized.results.filter(
+      (r) => r.id && (r.event === "ADD" || r.event === "UPDATE"),
+    );
+
+    if (addedItems.length && this.qdrantClient) {
+      const ids = addedItems.map((r) => r.id);
+      const now = new Date().toISOString();
+      try {
+        // Write canonical snake_case fields
+        await this.qdrantClient.setPayload(this.collectionName, {
+          payload: { user_id: options.user_id, created_at: now, updated_at: now },
+          points: ids,
+        });
+        // Remove redundant camelCase fields (keep userId for JS SDK dedup)
+        await this.qdrantClient.deletePayload(this.collectionName, {
+          keys: ["createdAt", "updatedAt"],
+          points: ids,
+        });
+      } catch { /* best-effort */ }
+
+      // Register in OpenMemory SQLite for UI visibility
+      this.registerInOpenMemory(addedItems, options.user_id).catch(() => {});
+    }
+
+    return normalized;
+  }
+
+  /** Register memories in OpenMemory's PostgreSQL via its REST API (fire-and-forget). */
+  private async registerInOpenMemory(
+    items: AddResultItem[],
+    userId: string,
+  ): Promise<void> {
+    const url = `${this.openMemoryApiUrl}/api/v1/memories/register/batch`;
+    const memories = items.map((item) => ({
+      memory_id: item.id,
+      content: item.memory,
+      user_id: userId,
+      app: "openclaw",
+    }));
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memories }),
+      });
+      if (!resp.ok) {
+        console.error(`[mem0] register batch failed: ${resp.status}`);
+      }
+    } catch (err) {
+      console.error(`[mem0] register batch error:`, err);
+    }
   }
 
   async search(query: string, options: SearchOptions): Promise<MemoryItem[]> {
     await this.ensureMemory();
-    // OSS SDK uses camelCase: userId/runId, not user_id/run_id
-    const opts: Record<string, unknown> = { userId: options.user_id };
-    if (options.run_id) opts.runId = options.run_id;
-    if (options.limit != null) opts.limit = options.limit;
-    else if (options.top_k != null) opts.limit = options.top_k;
-    if (options.keyword_search != null) opts.keyword_search = options.keyword_search;
-    if (options.reranking != null) opts.reranking = options.reranking;
-    if (options.source) opts.source = options.source;
-    if (options.threshold != null) opts.threshold = options.threshold;
-
-    const results = await this.memory.search(query, opts);
-    const normalized = normalizeSearchResults(results);
-
-    // Filter results by threshold if specified (client-side filtering as fallback)
+    const limit = options.limit ?? options.top_k ?? 10;
+    const queryEmbedding = await this.embedder.embed(query);
+    const hits = await this.qdrantClient.search(this.collectionName, {
+      vector: queryEmbedding,
+      filter: this.userFilter(options.user_id),
+      limit,
+    });
+    const results: MemoryItem[] = (hits ?? []).map((h: any) => normalizeQdrantHit(h));
     if (options.threshold != null) {
-      return normalized.filter(item => (item.score ?? 0) >= options.threshold!);
+      return results.filter(item => (item.score ?? 0) >= options.threshold!);
     }
-
-    return normalized;
+    return results;
   }
 
   async get(memoryId: string): Promise<MemoryItem> {
@@ -289,15 +358,13 @@ class OSSProvider implements Mem0Provider {
 
   async getAll(options: ListOptions): Promise<MemoryItem[]> {
     await this.ensureMemory();
-    // OSS SDK uses camelCase: userId/runId, not user_id/run_id
-    const getAllOpts: Record<string, unknown> = { userId: options.user_id };
-    if (options.run_id) getAllOpts.runId = options.run_id;
-    if (options.source) getAllOpts.source = options.source;
-    const results = await this.memory.getAll(getAllOpts);
-    if (Array.isArray(results)) return results.map(normalizeMemoryItem);
-    if (results?.results && Array.isArray(results.results))
-      return results.results.map(normalizeMemoryItem);
-    return [];
+    const response = await this.qdrantClient.scroll(this.collectionName, {
+      filter: this.userFilter(options.user_id),
+      limit: options.page_size ?? 100,
+      with_payload: true,
+      with_vectors: false,
+    });
+    return (response?.points ?? []).map((p: any) => normalizeQdrantHit(p));
   }
 
   async delete(memoryId: string): Promise<void> {
@@ -310,11 +377,25 @@ class OSSProvider implements Mem0Provider {
 // Result Normalizers
 // ============================================================================
 
+/** Normalize a raw Qdrant search/scroll hit into a MemoryItem. */
+function normalizeQdrantHit(hit: any): MemoryItem {
+  const p = hit.payload ?? {};
+  return {
+    id: String(hit.id ?? ""),
+    memory: p.data ?? "",
+    user_id: p.user_id ?? p.userId,
+    score: hit.score,
+    categories: p.categories,
+    metadata: p.metadata,
+    created_at: p.created_at ?? p.createdAt,
+    updated_at: p.updated_at ?? p.updatedAt,
+  };
+}
+
 function normalizeMemoryItem(raw: any): MemoryItem {
   return {
     id: raw.id ?? raw.memory_id ?? "",
     memory: raw.memory ?? raw.text ?? raw.content ?? "",
-    // Handle both platform (user_id, created_at) and OSS (userId, createdAt) field names
     user_id: raw.user_id ?? raw.userId,
     score: raw.score,
     categories: raw.categories,
@@ -503,6 +584,7 @@ const ALLOWED_KEYS = [
   "searchThreshold",
   "topK",
   "oss",
+  "openMemoryApiUrl",
 ];
 
 function assertAllowedKeys(
@@ -570,9 +652,13 @@ const mem0ConfigSchema = {
           : DEFAULT_CUSTOM_INSTRUCTIONS,
       enableGraph: cfg.enableGraph === true,
       searchThreshold:
-        typeof cfg.searchThreshold === "number" ? cfg.searchThreshold : 0.5,
+        typeof cfg.searchThreshold === "number" ? cfg.searchThreshold : 0.1,
       topK: typeof cfg.topK === "number" ? cfg.topK : 5,
       oss: ossConfig,
+      openMemoryApiUrl:
+        typeof cfg.openMemoryApiUrl === "string"
+          ? cfg.openMemoryApiUrl
+          : "http://localhost:8765",
     };
   },
 };
@@ -587,7 +673,7 @@ function createProvider(
 ): Mem0Provider {
   if (cfg.mode === "open-source") {
     return new OSSProvider(cfg.oss, cfg.customPrompt, (p) =>
-      api.resolvePath(p),
+      api.resolvePath(p), cfg.openMemoryApiUrl,
     );
   }
 

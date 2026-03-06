@@ -1,0 +1,49 @@
+---
+description: Git 提交规范
+alwaysApply: true
+---
+
+# Git 提交规范
+
+## Commit Message 格式
+
+使用 Conventional Commits，英文撰写：
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+```
+
+### Type
+
+| type | 用途 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | Bug 修复 |
+| `refactor` | 重构（不改变行为） |
+| `perf` | 性能优化 |
+| `docs` | 文档变更 |
+| `chore` | 构建/工具/依赖变更 |
+
+### Scope
+
+- `api` — OpenMemory API/MCP server
+- `ui` — OpenMemory UI
+- `plugin` — OpenClaw 插件
+- `docker` — Docker/部署配置
+- `memory` — 记忆系统（work-memory）
+
+### 示例
+
+```
+feat(api): add backfill-categories endpoint for uncategorized memories
+fix(plugin): unify Qdrant payload fields to snake_case
+refactor(api): extract categorization into background thread for MCP
+```
+
+## 分支策略
+
+- `main` 分支直接开发（个人项目）
+- 大功能用 feature 分支 + PR
+- 不要 force push main

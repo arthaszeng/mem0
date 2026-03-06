@@ -1,0 +1,49 @@
+---
+description: mem0 项目总览 — 帮助 AI 快速理解项目结构和技术架构
+alwaysApply: true
+---
+
+# mem0 项目总览
+
+本仓库是 Arthas 从 `mem0ai/mem0` fork 的个人版本，核心目标是**让不同 AI 客户端共享统一的记忆存储**。
+
+## 目录结构
+
+```
+mem0/
+├── openclaw/          # OpenClaw AI 助手的 mem0 插件（TypeScript）
+│   ├── index.ts       # 插件主逻辑
+│   └── package.json
+├── openmemory/
+│   ├── api/app/       # Python FastAPI 后端
+│   │   ├── mcp_server.py      # MCP Server（SSE 传输）
+│   │   ├── routers/memories.py # REST API
+│   │   ├── models.py          # SQLAlchemy 模型
+│   │   └── utils/             # 工具函数
+│   ├── ui/            # Next.js 管理界面
+│   └── docker-compose.yml
+```
+
+## 技术栈
+
+- **LLM**: Ollama (qwen2.5:7b) — 本地运行
+- **Embedding**: Ollama (nomic-embed-text) — 768 维
+- **向量库**: Qdrant — collection `openmemory_768`
+- **元数据**: SQLite (`openmemory.db`)
+- **后端**: Python 3.12 + FastAPI
+- **MCP**: SSE 传输，Cursor 通过 `http://192.168.31.214:8765/api/mcp/sse` 连接
+
+## 数据流
+
+```
+用户对话 → AI 客户端 → mem0 SDK → Qdrant (向量 + payload)
+                                  → SQLite (元数据 + 分类)
+                                  → 后台分类 (Ollama)
+```
+
+## 已解决的关键问题
+
+- JS/Python SDK payload 字段命名统一为 snake_case
+- 跨 SDK 数据双向互通（JS 写入后注册到 SQLite）
+- MCP 写入后自动触发分类
+- 本地 Ollama 分类服务 Docker 内访问配置

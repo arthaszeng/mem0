@@ -31,12 +31,28 @@ from fastapi import FastAPI, Request
 from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 # Load environment variables
 load_dotenv()
 
 # Initialize MCP
 mcp = FastMCP("mem0-mcp-server")
+
+
+def _run_categorization_in_background(memory_id: uuid.UUID, content: str):
+    """Schedule categorize_memory_background to run in a thread so it doesn't
+    block the async MCP handler. FastAPI BackgroundTasks aren't available in
+    MCP tool handlers, so we use a thread instead."""
+    import threading
+    from app.models import categorize_memory_background
+
+    t = threading.Thread(
+        target=categorize_memory_background,
+        args=(memory_id, content),
+        daemon=True,
+    )
+    t.start()
 
 # Don't initialize memory client at import time - do it lazily when needed
 def get_memory_client_safe():
@@ -89,6 +105,8 @@ async def add_memories(text: str) -> str:
                                             "mcp_client": client_name,
                                         })
 
+            memories_to_categorize = []
+
             # Process the response and update database
             if isinstance(response, dict) and 'results' in response:
                 for result in response['results']:
@@ -109,7 +127,6 @@ async def add_memories(text: str) -> str:
                             memory.state = MemoryState.active
                             memory.content = result['memory']
 
-                        # Create history entry
                         history = MemoryStatusHistory(
                             memory_id=memory_id,
                             changed_by=user.id,
@@ -117,12 +134,27 @@ async def add_memories(text: str) -> str:
                             new_state=MemoryState.active
                         )
                         db.add(history)
+                        memories_to_categorize.append((memory_id, result['memory']))
+
+                    elif result['event'] == 'UPDATE':
+                        if memory:
+                            memory.content = result['memory']
+                            memory.updated_at = datetime.datetime.now(datetime.UTC)
+                        else:
+                            memory = Memory(
+                                id=memory_id,
+                                user_id=user.id,
+                                app_id=app.id,
+                                content=result['memory'],
+                                state=MemoryState.active
+                            )
+                            db.add(memory)
+                        memories_to_categorize.append((memory_id, result['memory']))
 
                     elif result['event'] == 'DELETE':
                         if memory:
                             memory.state = MemoryState.deleted
                             memory.deleted_at = datetime.datetime.now(datetime.UTC)
-                            # Create history entry
                             history = MemoryStatusHistory(
                                 memory_id=memory_id,
                                 changed_by=user.id,
@@ -132,6 +164,13 @@ async def add_memories(text: str) -> str:
                             db.add(history)
 
                 db.commit()
+
+            # Trigger background categorization for new/updated memories
+            for mid, content in memories_to_categorize:
+                try:
+                    _run_categorization_in_background(mid, content)
+                except Exception as cat_err:
+                    logging.warning(f"Failed to schedule categorization for {mid}: {cat_err}")
 
             return json.dumps(response)
         finally:
@@ -165,34 +204,33 @@ async def search_memory(query: str) -> str:
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
-            filters = {
-                "user_id": uid
-            }
+            query_filter = Filter(
+                must=[FieldCondition(key="user_id", match=MatchValue(value=uid))]
+            )
 
             embeddings = memory_client.embedding_model.embed(query, "search")
 
-            hits = memory_client.vector_store.search(
-                query=query, 
-                vectors=embeddings, 
-                limit=10, 
-                filters=filters,
-            )
+            hits = memory_client.vector_store.client.query_points(
+                collection_name=memory_client.vector_store.collection_name,
+                query=embeddings,
+                query_filter=query_filter,
+                limit=10,
+            ).points
 
             allowed = set(str(mid) for mid in accessible_memory_ids) if accessible_memory_ids else None
 
             results = []
             for h in hits:
-                # All vector db search functions return OutputData class
-                id, score, payload = h.id, h.score, h.payload
-                if allowed and h.id is None or h.id not in allowed: 
+                id, score, payload = str(h.id), h.score, h.payload or {}
+                if allowed and (id is None or id not in allowed):
                     continue
-                
+
                 results.append({
-                    "id": id, 
-                    "memory": payload.get("data"), 
+                    "id": id,
+                    "memory": payload.get("data"),
                     "hash": payload.get("hash"),
-                    "created_at": payload.get("created_at"), 
-                    "updated_at": payload.get("updated_at"), 
+                    "created_at": payload.get("created_at"),
+                    "updated_at": payload.get("updated_at"),
                     "score": score,
                 })
 
