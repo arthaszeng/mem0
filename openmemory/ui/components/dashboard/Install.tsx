@@ -6,15 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Copy, Check } from "lucide-react";
 import Image from "next/image";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 const clientTabs = [
-  { key: "claude", label: "Claude", icon: "/images/claude.webp" },
-  { key: "cursor", label: "Cursor", icon: "/images/cursor.png" },
-  { key: "cline", label: "Cline", icon: "/images/cline.png" },
-  { key: "roocline", label: "Roo Cline", icon: "/images/roocline.png" },
-  { key: "windsurf", label: "Windsurf", icon: "/images/windsurf.png" },
-  { key: "witsy", label: "Witsy", icon: "/images/witsy.png" },
-  { key: "enconvo", label: "Enconvo", icon: "/images/enconvo.png" },
-  { key: "augment", label: "Augment", icon: "/images/augment.png" },
+  { key: "claude", label: "Claude", icon: `${basePath}/images/claude.webp` },
+  { key: "cursor", label: "Cursor", icon: `${basePath}/images/cursor.png` },
+  { key: "cline", label: "Cline", icon: `${basePath}/images/cline.png` },
+  { key: "roocline", label: "Roo Cline", icon: `${basePath}/images/roocline.png` },
+  { key: "windsurf", label: "Windsurf", icon: `${basePath}/images/windsurf.png` },
+  { key: "witsy", label: "Witsy", icon: `${basePath}/images/witsy.png` },
+  { key: "enconvo", label: "Enconvo", icon: `${basePath}/images/enconvo.png` },
+  { key: "augment", label: "Augment", icon: `${basePath}/images/augment.png` },
 ];
 
 const colorGradientMap: { [key: string]: string } = {
