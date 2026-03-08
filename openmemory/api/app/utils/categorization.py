@@ -156,16 +156,21 @@ def _parse_result(
         record_domain_candidate(llm_suggested_domain, memory_snippet)
         domain = keyword_domain or "General"
 
-    categories = parsed.get("categories", [])
-    if not isinstance(categories, list):
-        categories = []
-    categories = [str(c).strip().lower() for c in categories if c]
+    raw_categories = parsed.get("categories", [])
+    if isinstance(raw_categories, str):
+        raw_categories = [c.strip() for c in raw_categories.split(",") if c.strip()]
+    elif not isinstance(raw_categories, list):
+        raw_categories = []
+    categories = [str(c).strip().lower() for c in raw_categories if c]
 
     domain_info = known_domains.get(domain)
     if domain_info:
         slug = domain_info["category"]
         if slug not in categories:
             categories.insert(0, slug)
+
+    if not categories:
+        categories.append(domain.lower().replace("/", " ").strip())
 
     tags = parsed.get("tags", [])
     if not isinstance(tags, list):
@@ -288,5 +293,7 @@ def classify_memory(memory: str) -> Tuple[str, List[str], List[str]]:
         categories = []
         if domain in known_domains:
             categories.append(known_domains[domain]["category"])
+        if not categories:
+            categories.append(domain.lower().replace("/", " ").strip())
         tags = re.findall(r"#(\w+)", memory)
         return domain, categories, tags
