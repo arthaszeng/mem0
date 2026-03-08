@@ -13,16 +13,24 @@ import { useStats } from "@/hooks/useStats";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 import { useAppsApi } from "@/hooks/useAppsApi";
-import { Settings } from "lucide-react";
+import { Settings, LogOut } from "lucide-react";
 import { useConfig } from "@/hooks/useConfig";
+import { useRouter } from "next/navigation";
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
 
   const memoriesApi = useMemoriesApi();
   const appsApi = useAppsApi();
   const statsApi = useStats();
   const configApi = useConfig();
+
+  const handleLogout = async () => {
+    await fetch(`${basePath}/api/auth/logout`, { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  };
 
   // Define route matchers with typed parameter extraction
   const routeBasedFetchMapping: {
@@ -160,6 +168,14 @@ export function Navbar() {
             Refresh
           </Button>
           <CreateMemoryDialog />
+          <Button
+            onClick={handleLogout}
+            variant="outline"
+            size="sm"
+            className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white"
+          >
+            <LogOut className="h-4 w-4" />
+          </Button>
         </div>
       </div>
     </header>

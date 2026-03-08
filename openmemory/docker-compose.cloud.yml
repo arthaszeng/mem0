@@ -37,6 +37,9 @@ services:
       - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8765}
       - NEXT_PUBLIC_USER_ID=${MEM0_USER}
       - NEXT_PUBLIC_BASE_PATH=/memory
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - AUTH_SECRET=${AUTH_SECRET}
     depends_on:
       - openmemory-mcp
     restart: unless-stopped
