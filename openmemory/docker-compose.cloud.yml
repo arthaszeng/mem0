@@ -29,12 +29,14 @@ services:
       dockerfile: Dockerfile
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com/}
+        NEXT_PUBLIC_BASE_PATH: /memory
     image: mem0/openmemory-ui:latest
     ports:
       - "127.0.0.1:3001:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8765}
       - NEXT_PUBLIC_USER_ID=${MEM0_USER}
+      - NEXT_PUBLIC_BASE_PATH=/memory
     depends_on:
       - openmemory-mcp
     restart: unless-stopped
