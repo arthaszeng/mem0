@@ -12,14 +12,20 @@ export async function middleware(req: NextRequest) {
   if (!secret) return NextResponse.next();
 
   const token = req.cookies.get(COOKIE_NAME)?.value;
+
+  const toLogin = () => {
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    return url;
+  };
+
   if (!token) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    return NextResponse.redirect(toLogin());
   }
 
   const { valid } = await verifySessionToken(token, secret);
   if (!valid) {
-    const loginUrl = new URL("/login", req.url);
-    const res = NextResponse.redirect(loginUrl);
+    const res = NextResponse.redirect(toLogin());
     res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
     return res;
   }
