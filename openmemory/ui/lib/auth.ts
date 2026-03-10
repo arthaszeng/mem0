@@ -1,57 +1,35 @@
-export const COOKIE_NAME = "om_session";
-export const USER_COOKIE_NAME = "om_user";
-export const TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+export const TOKEN_COOKIE = "om_token";
+export const USER_COOKIE = "om_user";
 
-async function getHmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
+export function getCookie(name: string): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const match = document.cookie
+    .split("; ")
+    .find((c) => c.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.split("=")[1]) : undefined;
 }
 
-async function hmacSign(payload: string, secret: string): Promise<string> {
-  const key = await getHmacKey(secret);
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(payload),
-  );
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+export function setCookie(name: string, value: string, maxAgeSec: number) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSec}; SameSite=Strict`;
 }
 
-export async function createSessionToken(
-  username: string,
-  secret: string,
-): Promise<string> {
-  const exp = Date.now() + TOKEN_EXPIRY_MS;
-  const payload = `${username}|${exp}`;
-  const sig = await hmacSign(payload, secret);
-  return `${btoa(payload)}.${sig}`;
+export function deleteCookie(name: string) {
+  document.cookie = `${name}=; path=/; max-age=0`;
 }
 
-export async function verifySessionToken(
-  token: string,
-  secret: string,
-): Promise<{ valid: boolean; username?: string }> {
+export function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
-    const dotIdx = token.indexOf(".");
-    if (dotIdx === -1) return { valid: false };
-
-    const payloadB64 = token.slice(0, dotIdx);
-    const sig = token.slice(dotIdx + 1);
-    const payload = atob(payloadB64);
-
-    const expected = await hmacSign(payload, secret);
-    if (expected !== sig) return { valid: false };
-
-    const [username, expStr] = payload.split("|");
-    if (Date.now() > Number(expStr)) return { valid: false };
-
-    return { valid: true, username };
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(payload);
   } catch {
-    return { valid: false };
+    return null;
   }
+}
+
+export function isTokenExpired(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  if (!payload || !payload.exp) return true;
+  return Date.now() / 1000 > payload.exp;
 }

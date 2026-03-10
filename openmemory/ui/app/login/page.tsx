@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Image from "next/image";
+import { TOKEN_COOKIE, USER_COOKIE, setCookie, decodeJwtPayload } from "@/lib/auth";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -22,7 +23,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${basePath}/api/auth/login`, {
+      const res = await fetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -30,11 +31,22 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Login failed");
+        setError(data.detail || data.error || "Login failed");
         return;
       }
 
-      router.push("/");
+      const data = await res.json();
+      const payload = decodeJwtPayload(data.access_token);
+      const maxAge = data.expires_in || 3600;
+
+      setCookie(TOKEN_COOKIE, data.access_token, maxAge);
+      setCookie(USER_COOKIE, payload?.username || username, maxAge);
+
+      if (data.must_change_password) {
+        router.push("/change-password");
+      } else {
+        router.push("/");
+      }
       router.refresh();
     } catch {
       setError("Network error");
@@ -95,7 +107,6 @@ export default function LoginPage() {
 
           <Button
             type="submit"
-            disabled={loading}
             className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in"}

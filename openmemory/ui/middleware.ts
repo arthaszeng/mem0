@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, COOKIE_NAME } from "@/lib/auth";
+
+const TOKEN_COOKIE = "om_token";
+
+function isJwtExpired(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return true;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return !payload.exp || Date.now() / 1000 > payload.exp;
+  } catch {
+    return true;
+  }
+}
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -8,25 +20,15 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return NextResponse.next();
+  const token = req.cookies.get(TOKEN_COOKIE)?.value;
 
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-
-  const toLogin = () => {
+  if (!token || isJwtExpired(token)) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
-    return url;
-  };
-
-  if (!token) {
-    return NextResponse.redirect(toLogin());
-  }
-
-  const { valid } = await verifySessionToken(token, secret);
-  if (!valid) {
-    const res = NextResponse.redirect(toLogin());
-    res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    const res = NextResponse.redirect(url);
+    if (token) {
+      res.cookies.set(TOKEN_COOKIE, "", { path: "/", maxAge: 0 });
+    }
     return res;
   }
 

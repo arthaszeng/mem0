@@ -4,20 +4,23 @@ import { useEffect } from "react";
 import { Provider, useDispatch } from "react-redux";
 import { store } from "../store/store";
 import { setUserId } from "@/store/profileSlice";
-import { USER_COOKIE_NAME } from "@/lib/auth";
+import { USER_COOKIE, TOKEN_COOKIE, getCookie, decodeJwtPayload } from "@/lib/auth";
 
 function AuthInit({ children }: { children: React.ReactNode }) {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    const match = document.cookie
-      .split("; ")
-      .find((c) => c.startsWith(`${USER_COOKIE_NAME}=`));
-    if (match) {
-      const username = decodeURIComponent(match.split("=")[1]);
-      if (username) {
-        dispatch(setUserId(username));
+    const token = getCookie(TOKEN_COOKIE);
+    if (token) {
+      const payload = decodeJwtPayload(token);
+      if (payload?.username) {
+        dispatch(setUserId(payload.username));
+        return;
       }
+    }
+    const user = getCookie(USER_COOKIE);
+    if (user) {
+      dispatch(setUserId(user));
     }
   }, [dispatch]);
 

@@ -312,14 +312,19 @@
       }
     },
     "securitySchemes": {
-      "ApiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-API-Key"
+      "OAuth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "/auth/authorize",
+            "tokenUrl": "/auth/token",
+            "scopes": {}
+          }
+        }
       }
     }
   },
   "security": [
-    { "ApiKeyAuth": [] }
+    { "OAuth2": [] }
   ]
 }
