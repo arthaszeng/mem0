@@ -179,10 +179,10 @@ user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("user_id")
 client_name_var: contextvars.ContextVar[str] = contextvars.ContextVar("client_name")
 
 # Create a router for MCP endpoints
-mcp_router = APIRouter(prefix="/mcp")
+mcp_router = APIRouter(prefix="/memory-mcp")
 
 # Initialize SSE transport
-sse = SseServerTransport("/mcp/messages/")
+sse = SseServerTransport("/memory-mcp/messages/")
 
 @mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something.")
 async def add_memories(text: str) -> str:

@@ -14,7 +14,7 @@ from fastapi_pagination import add_pagination
 from starlette.middleware.base import BaseHTTPMiddleware
 
 API_KEY = os.getenv("API_KEY", "")
-API_KEY_EXEMPT_PREFIXES = ("/mcp/", "/docs", "/openapi.json", "/redoc")
+API_KEY_EXEMPT_PREFIXES = ("/memory-mcp/", "/docs", "/openapi.json", "/redoc")
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
