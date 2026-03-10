@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import axios from 'axios';
+import api from '@/lib/api';
 import { Memory, Client, Category } from '@/components/types';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
@@ -76,6 +76,7 @@ interface UseMemoriesApiReturn {
     filters?: {
       apps?: string[];
       categories?: string[];
+      domains?: string[];
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
@@ -104,8 +105,6 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const memories = useSelector((state: RootState) => state.memories.memories);
   const selectedMemory = useSelector((state: RootState) => state.memories.selectedMemory);
 
-  const URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
-
   const fetchMemories = useCallback(async (
     query?: string,
     page: number = 1,
@@ -113,6 +112,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     filters?: {
       apps?: string[];
       categories?: string[];
+      domains?: string[];
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
@@ -121,8 +121,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await axios.post<ApiResponse>(
-        `${URL}/api/v1/memories/filter`,
+      const response = await api.post<ApiResponse>(
+        `/api/v1/memories/filter`,
         {
           user_id: user_id,
           page: page,
@@ -130,6 +130,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
           search_query: query,
           app_ids: filters?.apps,
           category_ids: filters?.categories,
+          domains: filters?.domains,
           sort_column: filters?.sortColumn?.toLowerCase(),
           sort_direction: filters?.sortDirection,
           show_archived: filters?.showArchived
@@ -144,7 +145,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         metadata: item.metadata_,
         categories: item.categories as Category[],
         client: 'api',
-        app_name: item.app_name
+        app_name: item.app_name,
+        domain: item.metadata_?.domain || "General",
       }));
       setIsLoading(false);
       dispatch(setMemoriesSuccess(adaptedMemories));
@@ -169,7 +171,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         infer: false,
         app: "openmemory",
       }
-      await axios.post<ApiMemoryItem>(`${URL}/api/v1/memories/`, memoryData);
+      await api.post<ApiMemoryItem>(`/api/v1/memories/`, memoryData);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to create memory';
       setError(errorMessage);
@@ -180,7 +182,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
 
   const deleteMemories = async (memory_ids: string[]) => {
     try {
-      await axios.delete(`${URL}/api/v1/memories/`, {
+      await api.delete(`/api/v1/memories/`, {
         data: { memory_ids, user_id }
       });
       dispatch(setMemoriesSuccess(memories.filter((memory: Memory) => !memory_ids.includes(memory.id))));
@@ -199,8 +201,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await axios.get<SimpleMemory>(
-        `${URL}/api/v1/memories/${memoryId}?user_id=${user_id}`
+      const response = await api.get<SimpleMemory>(
+        `/api/v1/memories/${memoryId}?user_id=${user_id}`
       );
       setIsLoading(false);
       dispatch(setSelectedMemory(response.data));
@@ -219,8 +221,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await axios.get<AccessLogResponse>(
-        `${URL}/api/v1/memories/${memoryId}/access-log?page=${page}&page_size=${pageSize}`
+      const response = await api.get<AccessLogResponse>(
+        `/api/v1/memories/${memoryId}/access-log?page=${page}&page_size=${pageSize}`
       );
       setIsLoading(false);
       dispatch(setAccessLogs(response.data.logs));
@@ -239,8 +241,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await axios.get<RelatedMemoriesResponse>(
-        `${URL}/api/v1/memories/${memoryId}/related?user_id=${user_id}`
+      const response = await api.get<RelatedMemoriesResponse>(
+        `/api/v1/memories/${memoryId}/related?user_id=${user_id}`
       );
 
       const adaptedMemories: Memory[] = response.data.items.map((item: RelatedMemoryItem) => ({
@@ -251,7 +253,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         metadata: item.metadata_,
         categories: item.categories as Category[],
         client: 'api',
-        app_name: item.app_name
+        app_name: item.app_name,
+        domain: item.metadata_?.domain || "General",
       }));
 
       setIsLoading(false);
@@ -271,7 +274,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     setIsLoading(true);
     setError(null);
     try {
-      await axios.put(`${URL}/api/v1/memories/${memoryId}`, {
+      await api.put(`/api/v1/memories/${memoryId}`, {
         memory_id: memoryId,
         memory_content: content,
         user_id: user_id
@@ -293,7 +296,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
     setIsLoading(true);
     setError(null);
     try {
-      await axios.post(`${URL}/api/v1/memories/actions/pause`, {
+      await api.post(`/api/v1/memories/actions/pause`, {
         memory_ids: memoryIds,
         all_for_app: true,
         state: state,

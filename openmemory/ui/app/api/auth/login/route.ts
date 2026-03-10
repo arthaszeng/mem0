@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createSessionToken,
   COOKIE_NAME,
+  USER_COOKIE_NAME,
   TOKEN_EXPIRY_MS,
 } from "@/lib/auth";
 
@@ -27,14 +28,23 @@ export async function POST(req: NextRequest) {
   }
 
   const token = await createSessionToken(username, secret);
+  const isSecure = req.headers.get("x-forwarded-proto") === "https";
+  const maxAge = TOKEN_EXPIRY_MS / 1000;
 
-  const res = NextResponse.json({ success: true });
+  const res = NextResponse.json({ success: true, username });
   res.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: req.headers.get("x-forwarded-proto") === "https",
+    secure: isSecure,
     sameSite: "lax",
     path: "/",
-    maxAge: TOKEN_EXPIRY_MS / 1000,
+    maxAge,
+  });
+  res.cookies.set(USER_COOKIE_NAME, username, {
+    httpOnly: false,
+    secure: isSecure,
+    sameSite: "lax",
+    path: "/",
+    maxAge,
   });
   return res;
 }

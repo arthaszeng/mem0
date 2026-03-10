@@ -6,10 +6,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Providers } from "./providers";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 export const metadata = {
   title: "OpenMemory - Developer Dashboard",
   description: "Manage your OpenMemory integration and stored memories",
   generator: "v0.dev",
+  icons: {
+    icon: `${basePath}/logo.svg`,
+  },
 };
 
 export default function RootLayout({

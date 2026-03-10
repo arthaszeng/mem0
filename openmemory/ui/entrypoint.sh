@@ -1,20 +1,20 @@
 #!/bin/sh
 set -e
 
-# Ensure the working directory is correct
 cd /app
 
-
-
-# Replace env variable placeholders with real values
-printenv | grep NEXT_PUBLIC_ | while read -r line ; do
-  key=$(echo $line | cut -d "=" -f1)
-  value=$(echo $line | cut -d "=" -f2)
-
-  find .next/ -type f -exec sed -i "s|$key|$value|g" {} \;
+# Replace %%NEXT_PUBLIC_*%% placeholders baked at build time
+# with actual runtime environment variable values.
+# This allows the same image to run in any environment.
+printenv | grep '^NEXT_PUBLIC_' | while IFS='=' read -r key rest; do
+  value=$(printenv "$key")
+  placeholder="%%${key}%%"
+  if [ -n "$value" ] && [ "$value" != "$placeholder" ]; then
+    find .next/ -type f \( -name '*.js' -o -name '*.json' -o -name '*.html' \) \
+      -exec sed -i "s|${placeholder}|${value}|g" {} +
+  fi
 done
-echo "Done replacing env variables NEXT_PUBLIC_ with real values"
 
+echo "Done replacing env variable placeholders with real values"
 
-# Execute the container's main process (CMD in Dockerfile)
 exec "$@"

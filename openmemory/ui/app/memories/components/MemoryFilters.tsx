@@ -24,7 +24,7 @@ export function MemoryFilters() {
   const selectedMemoryIds = useSelector(
     (state: RootState) => state.memories.selectedMemoryIds
   );
-  const { deleteMemories, updateMemoryState, fetchMemories } = useMemoriesApi();
+  const { deleteMemories, updateMemoryState } = useMemoriesApi();
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeFilters = useSelector((state: RootState) => state.filters.apps);
@@ -79,14 +79,17 @@ export function MemoryFilters() {
     }
   }, []);
 
-  const handleClearAllFilters = async () => {
+  const handleClearAllFilters = () => {
     dispatch(clearFilters());
-    await fetchMemories(); // Fetch memories without any filters
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", "1");
+    router.push(`?${params.toString()}`);
   };
 
   const hasActiveFilters =
     activeFilters.selectedApps.length > 0 ||
-    activeFilters.selectedCategories.length > 0;
+    activeFilters.selectedCategories.length > 0 ||
+    activeFilters.selectedDomains.length > 0;
 
   return (
     <div className="flex flex-col md:flex-row gap-4 mb-4">

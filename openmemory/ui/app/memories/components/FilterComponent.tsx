@@ -31,9 +31,11 @@ import { useFiltersApi } from "@/hooks/useFiltersApi";
 import {
   setSelectedApps,
   setSelectedCategories,
+  setSelectedDomains,
+  setShowArchived,
   clearFilters,
 } from "@/store/filtersSlice";
-import { useMemoriesApi } from "@/hooks/useMemoriesApi";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const columns = [
   {
@@ -53,31 +55,37 @@ const columns = [
 export default function FilterComponent() {
   const dispatch = useDispatch();
   const { fetchApps } = useAppsApi();
-  const { fetchCategories, updateSort } = useFiltersApi();
-  const { fetchMemories } = useMemoriesApi();
+  const { fetchCategories, fetchDomains, updateSort } = useFiltersApi();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [tempSelectedApps, setTempSelectedApps] = useState<string[]>([]);
   const [tempSelectedCategories, setTempSelectedCategories] = useState<
     string[]
   >([]);
+  const [tempSelectedDomains, setTempSelectedDomains] = useState<string[]>([]);
   const [showArchived, setShowArchived] = useState(false);
 
   const apps = useSelector((state: RootState) => state.apps.apps);
   const categories = useSelector(
     (state: RootState) => state.filters.categories.items
   );
+  const domains = useSelector(
+    (state: RootState) => state.filters.domains.items
+  );
   const filters = useSelector((state: RootState) => state.filters.apps);
 
   useEffect(() => {
     fetchApps();
     fetchCategories();
-  }, [fetchApps, fetchCategories]);
+    fetchDomains();
+  }, [fetchApps, fetchCategories, fetchDomains]);
 
   useEffect(() => {
-    // Initialize temporary selections with current active filters when dialog opens
     if (isOpen) {
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
+      setTempSelectedDomains(filters.selectedDomains);
       setShowArchived(filters.showArchived || false);
     }
   }, [isOpen, filters]);
@@ -108,91 +116,69 @@ export default function FilterComponent() {
     setTempSelectedCategories(checked ? categories.map((cat) => cat.name) : []);
   };
 
-  const handleClearFilters = async () => {
-    setTempSelectedApps([]);
-    setTempSelectedCategories([]);
-    setShowArchived(false);
-    dispatch(clearFilters());
-    await fetchMemories();
+  const toggleDomainFilter = (domain: string) => {
+    setTempSelectedDomains((prev) =>
+      prev.includes(domain) ? prev.filter((d) => d !== domain) : [...prev, domain]
+    );
   };
 
-  const handleApplyFilters = async () => {
-    try {
-      // Get category IDs for selected category names
-      const selectedCategoryIds = categories
-        .filter((cat) => tempSelectedCategories.includes(cat.name))
-        .map((cat) => cat.id);
+  const toggleAllDomains = (checked: boolean) => {
+    setTempSelectedDomains(checked ? [...domains] : []);
+  };
 
-      // Get app IDs for selected app names
-      const selectedAppIds = apps
-        .filter((app) => tempSelectedApps.includes(app.id))
-        .map((app) => app.id);
+  const resetPageToFirst = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", "1");
+    router.push(`?${params.toString()}`);
+  };
 
-      // Update the global state with temporary selections
-      dispatch(setSelectedApps(tempSelectedApps));
-      dispatch(setSelectedCategories(tempSelectedCategories));
-      dispatch({ type: "filters/setShowArchived", payload: showArchived });
+  const handleClearFilters = () => {
+    setTempSelectedApps([]);
+    setTempSelectedCategories([]);
+    setTempSelectedDomains([]);
+    setShowArchived(false);
+    dispatch(clearFilters());
+    resetPageToFirst();
+  };
 
-      await fetchMemories(undefined, 1, 10, {
-        apps: selectedAppIds,
-        categories: selectedCategoryIds,
-        sortColumn: filters.sortColumn,
-        sortDirection: filters.sortDirection,
-        showArchived: showArchived,
-      });
-      setIsOpen(false);
-    } catch (error) {
-      console.error("Failed to apply filters:", error);
-    }
+  const handleApplyFilters = () => {
+    setIsOpen(false);
+    dispatch(setSelectedApps(tempSelectedApps));
+    dispatch(setSelectedCategories(tempSelectedCategories));
+    dispatch(setSelectedDomains(tempSelectedDomains));
+    dispatch(setShowArchived(showArchived));
+    resetPageToFirst();
   };
 
   const handleDialogChange = (open: boolean) => {
     setIsOpen(open);
     if (!open) {
-      // Reset temporary selections to active filters when dialog closes without applying
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
+      setTempSelectedDomains(filters.selectedDomains);
       setShowArchived(filters.showArchived || false);
     }
   };
 
-  const setSorting = async (column: string) => {
+  const setSorting = (column: string) => {
     const newDirection =
       filters.sortColumn === column && filters.sortDirection === "asc"
         ? "desc"
         : "asc";
     updateSort(column, newDirection);
-
-    // Get category IDs for selected category names
-    const selectedCategoryIds = categories
-      .filter((cat) => tempSelectedCategories.includes(cat.name))
-      .map((cat) => cat.id);
-
-    // Get app IDs for selected app names
-    const selectedAppIds = apps
-      .filter((app) => tempSelectedApps.includes(app.id))
-      .map((app) => app.id);
-
-    try {
-      await fetchMemories(undefined, 1, 10, {
-        apps: selectedAppIds,
-        categories: selectedCategoryIds,
-        sortColumn: column,
-        sortDirection: newDirection,
-      });
-    } catch (error) {
-      console.error("Failed to apply sorting:", error);
-    }
+    resetPageToFirst();
   };
 
   const hasActiveFilters =
     filters.selectedApps.length > 0 ||
     filters.selectedCategories.length > 0 ||
+    filters.selectedDomains.length > 0 ||
     filters.showArchived;
 
   const hasTempFilters =
     tempSelectedApps.length > 0 ||
     tempSelectedCategories.length > 0 ||
+    tempSelectedDomains.length > 0 ||
     showArchived;
 
   return (
@@ -213,6 +199,7 @@ export default function FilterComponent() {
               <Badge className="ml-2 bg-primary hover:bg-primary/80 text-xs">
                 {filters.selectedApps.length +
                   filters.selectedCategories.length +
+                  filters.selectedDomains.length +
                   (filters.showArchived ? 1 : 0)}
               </Badge>
             )}
@@ -225,7 +212,7 @@ export default function FilterComponent() {
             </DialogTitle>
           </DialogHeader>
           <Tabs defaultValue="apps" className="w-full">
-            <TabsList className="grid grid-cols-3 bg-zinc-800">
+            <TabsList className="grid grid-cols-4 bg-zinc-800">
               <TabsTrigger
                 value="apps"
                 className="data-[state=active]:bg-zinc-700"
@@ -239,6 +226,12 @@ export default function FilterComponent() {
                 Categories
               </TabsTrigger>
               <TabsTrigger
+                value="domains"
+                className="data-[state=active]:bg-zinc-700"
+              >
+                Domains
+              </TabsTrigger>
+              <TabsTrigger
                 value="archived"
                 className="data-[state=active]:bg-zinc-700"
               >
@@ -246,7 +239,7 @@ export default function FilterComponent() {
               </TabsTrigger>
             </TabsList>
             <TabsContent value="apps" className="mt-4">
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="select-all-apps"
@@ -284,7 +277,7 @@ export default function FilterComponent() {
               </div>
             </TabsContent>
             <TabsContent value="categories" className="mt-4">
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="select-all-categories"
@@ -322,6 +315,48 @@ export default function FilterComponent() {
                       className="text-sm font-normal text-zinc-300 cursor-pointer"
                     >
                       {category.name}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </TabsContent>
+            <TabsContent value="domains" className="mt-4">
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="select-all-domains"
+                    checked={
+                      domains.length > 0 &&
+                      tempSelectedDomains.length === domains.length
+                    }
+                    onCheckedChange={(checked) =>
+                      toggleAllDomains(checked as boolean)
+                    }
+                    className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                  />
+                  <Label
+                    htmlFor="select-all-domains"
+                    className="text-sm font-normal text-zinc-300 cursor-pointer"
+                  >
+                    Select All
+                  </Label>
+                </div>
+                {domains.map((domain) => (
+                  <div
+                    key={domain}
+                    className="flex items-center space-x-2"
+                  >
+                    <Checkbox
+                      id={`domain-${domain}`}
+                      checked={tempSelectedDomains.includes(domain)}
+                      onCheckedChange={() => toggleDomainFilter(domain)}
+                      className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                    />
+                    <Label
+                      htmlFor={`domain-${domain}`}
+                      className="text-sm font-normal text-zinc-300 cursor-pointer"
+                    >
+                      {domain}
                     </Label>
                   </div>
                 ))}

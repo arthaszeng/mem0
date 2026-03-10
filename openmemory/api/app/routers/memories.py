@@ -104,7 +104,7 @@ def get_accessible_memory_ids(db: Session, app_id: UUID) -> Set[UUID]:
 class SearchMemoryRequest(BaseModel):
     query: str
     user_id: str
-    limit: int = 10
+    limit: int = 100
     threshold: float = 0.0
 
 
@@ -304,6 +304,30 @@ async def get_categories(
         "categories": unique_categories,
         "total": len(unique_categories)
     }
+
+
+@router.get("/domains")
+async def get_domains(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    results = (
+        db.query(func.json_extract(Memory.metadata_, "$.domain"))
+        .filter(
+            Memory.user_id == user.id,
+            Memory.state != MemoryState.deleted,
+            Memory.state != MemoryState.archived,
+            Memory.metadata_.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    domains = sorted([r[0] for r in results if r[0]])
+    return {"domains": domains, "total": len(domains)}
 
 
 class CreateMemoryRequest(BaseModel):
@@ -767,6 +791,7 @@ class FilterMemoriesRequest(BaseModel):
     search_query: Optional[str] = None
     app_ids: Optional[List[UUID]] = None
     category_ids: Optional[List[UUID]] = None
+    domains: Optional[List[str]] = None
     sort_column: Optional[str] = None
     sort_direction: Optional[str] = None
     from_date: Optional[int] = None
@@ -805,6 +830,12 @@ async def filter_memories(
     # Apply app filter
     if request.app_ids:
         query = query.filter(Memory.app_id.in_(request.app_ids))
+
+    # Apply domain filter
+    if request.domains:
+        query = query.filter(
+            func.json_extract(Memory.metadata_, "$.domain").in_(request.domains)
+        )
 
     # Add joins for app and categories
     query = query.outerjoin(App, Memory.app_id == App.id)

@@ -19,6 +19,7 @@ from app.utils.docker_host import get_docker_host_url
 from app.utils.domain_registry import get_domains, record_domain_candidate
 from app.utils.prompts import (
     OLLAMA_CATEGORIZATION_SUFFIX,
+    STANDARD_CATEGORIES_SET,
     build_categorization_prompt,
 )
 from dotenv import load_dotenv
@@ -163,14 +164,10 @@ def _parse_result(
         raw_categories = []
     categories = [str(c).strip().lower() for c in raw_categories if c]
 
-    domain_info = known_domains.get(domain)
-    if domain_info:
-        slug = domain_info["category"]
-        if slug not in categories:
-            categories.insert(0, slug)
+    categories = [c for c in categories if c in STANDARD_CATEGORIES_SET]
 
     if not categories:
-        categories.append(domain.lower().replace("/", " ").strip())
+        categories.append("reference")
 
     tags = parsed.get("tags", [])
     if not isinstance(tags, list):
@@ -290,10 +287,6 @@ def classify_memory(memory: str) -> Tuple[str, List[str], List[str]]:
             CATEGORIZATION_PROVIDER, e,
         )
         domain = keyword_domain or "General"
-        categories = []
-        if domain in known_domains:
-            categories.append(known_domains[domain]["category"])
-        if not categories:
-            categories.append(domain.lower().replace("/", " ").strip())
+        categories = ["reference"]
         tags = re.findall(r"#(\w+)", memory)
         return domain, categories, tags

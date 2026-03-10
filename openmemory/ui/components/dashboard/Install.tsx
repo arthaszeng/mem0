@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Copy, Check } from "lucide-react";
@@ -47,7 +49,7 @@ const allTabs = [{ key: "mcp", label: "MCP Link", icon: "🔗" }, ...clientTabs]
 
 export const Install = () => {
   const [copiedTab, setCopiedTab] = useState<string | null>(null);
-  const user = process.env.NEXT_PUBLIC_USER_ID || "user";
+  const user = useSelector((state: RootState) => state.profile.userId) || "user";
 
   const URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
 

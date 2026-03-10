@@ -9,12 +9,14 @@ services:
 
   openmemory-mcp:
     image: mem0/openmemory-mcp
-    build:
-      context: api/
-      args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-    env_file:
-      - api/.env
+    environment:
+      - MEM0_USER=${MEM0_USER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - API_KEY=${API_KEY:-}
+      - CATEGORIZATION_PROVIDER=${CATEGORIZATION_PROVIDER:-openai}
+      - CATEGORIZATION_MODEL=${CATEGORIZATION_MODEL:-}
+      - FORCE_OPENAI=${FORCE_OPENAI:-}
     depends_on:
       - mem0_store
     ports:
@@ -24,21 +26,11 @@ services:
     restart: unless-stopped
 
   openmemory-ui:
-    build:
-      context: ui/
-      dockerfile: Dockerfile
-      args:
-        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com/}
-        NEXT_PUBLIC_BASE_PATH: /memory
-        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8765}
-        NEXT_PUBLIC_USER_ID: ${MEM0_USER:-arthaszeng}
     image: mem0/openmemory-ui:latest
     ports:
       - "127.0.0.1:3001:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:8765}
-      - NEXT_PUBLIC_USER_ID=${MEM0_USER:-arthaszeng}
-      - NEXT_PUBLIC_BASE_PATH=/memory
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - AUTH_USERNAME=${AUTH_USERNAME}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - AUTH_SECRET=${AUTH_SECRET}
@@ -61,10 +53,6 @@ services:
     restart: unless-stopped
 
   langgraph-agent:
-    build:
-      context: ../langgraph-agent/
-      args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     image: mem0/langgraph-agent:latest
     ports:
       - "127.0.0.1:8766:8766"

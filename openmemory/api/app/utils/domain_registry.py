@@ -44,8 +44,9 @@ _SEED_DOMAINS: Dict[str, dict] = {
             "ConcurOCR", "EIM", "Jing", "MA推送", "CKafka",
             "osmp-", "eventpro", "OneSpeaker", "合规流", "Landing Page",
             "二维码", "小程序", "关会", "创会", "改会", "报名",
+            "Vue3", "v-permission", "ElementPlus", "前端技术栈", "菜单权限",
+            "stringForSign", "SHA1",
         ],
-        "category": "osmp/myevent",
     },
     "mem0/OpenMemory": {
         "display": "mem0记忆管理系统",
@@ -58,7 +59,17 @@ _SEED_DOMAINS: Dict[str, dict] = {
             "MCP server", "memory client", "categorization",
             "fact extraction", "vector store", "记忆分类",
         ],
-        "category": "mem0/openmemory",
+    },
+    "arthas1/Trading": {
+        "display": "arthas1量化交易系统",
+        "aliases": [
+            "arthas1", "量化交易", "交易系统", "A股", "量化",
+        ],
+        "keywords": [
+            "Tushare", "回测", "backtest", "策略", "stock",
+            "trade_calendar", "daily_trade", "信号", "撮合", "T+1",
+            "stock_list", "daily_basic", "stock_st", "收盘",
+        ],
     },
 }
 
@@ -162,17 +173,18 @@ def add_domain(
     display: str,
     aliases: List[str],
     keywords: List[str],
-    category: Optional[str] = None,
 ) -> Dict[str, dict]:
     """Add or update a single domain entry. Returns the updated registry."""
     with _write_lock:
         domains = dict(get_domains())
-        domains[name] = {
+        entry = domains.get(name, {})
+        entry.update({
             "display": display,
             "aliases": aliases,
             "keywords": keywords,
-            "category": category or name.lower(),
-        }
+        })
+        entry.pop("category", None)
+        domains[name] = entry
         save_domains(domains)
         return domains
 

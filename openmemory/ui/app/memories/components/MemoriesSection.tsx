@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Category, Client } from "../../../components/types";
 import { MemoryTable } from "./MemoryTable";
@@ -8,6 +8,8 @@ import { PageSizeSelector } from "./PageSizeSelector";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MemoryTableSkeleton } from "@/skeleton/MemoryTableSkeleton";
+import { useSelector } from "react-redux";
+import { RootState } from "@/store/store";
 
 export function MemoriesSection() {
   const router = useRouter();
@@ -25,15 +27,32 @@ export function MemoriesSection() {
   );
   const [selectedClient, setSelectedClient] = useState<Client | "all">("all");
 
+  const filters = useSelector((state: RootState) => state.filters.apps);
+  const categoryItems = useSelector((state: RootState) => state.filters.categories.items);
+  const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+
   useEffect(() => {
     const loadMemories = async () => {
       setIsLoading(true);
       try {
         const searchQuery = searchParams.get("search") || "";
+
+        const categoryIds = categoryItems
+          .filter(cat => filters.selectedCategories.includes(cat.name))
+          .map(cat => cat.id);
+
         const result = await fetchMemories(
           searchQuery,
           currentPage,
-          itemsPerPage
+          itemsPerPage,
+          {
+            apps: filters.selectedApps.length > 0 ? filters.selectedApps : undefined,
+            categories: categoryIds.length > 0 ? categoryIds : undefined,
+            domains: filters.selectedDomains.length > 0 ? filters.selectedDomains : undefined,
+            sortColumn: filters.sortColumn,
+            sortDirection: filters.sortDirection,
+            showArchived: filters.showArchived,
+          }
         );
         setMemories(result.memories);
         setTotalItems(result.total);
@@ -45,7 +64,7 @@ export function MemoriesSection() {
     };
 
     loadMemories();
-  }, [currentPage, itemsPerPage, fetchMemories, searchParams]);
+  }, [currentPage, itemsPerPage, fetchMemories, searchParams, filterKey]);
 
   const setCurrentPage = (page: number) => {
     const params = new URLSearchParams(searchParams.toString());

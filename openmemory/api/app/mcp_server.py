@@ -250,7 +250,7 @@ async def search_memory(query: str) -> str:
                     collection_name=memory_client.vector_store.collection_name,
                     query=emb,
                     query_filter=query_filter,
-                    limit=10,
+                    limit=100,
                 ).points
 
             hits = await asyncio.to_thread(_do_search)
@@ -286,7 +286,7 @@ async def search_memory(query: str) -> str:
                         ) == matched_domain,
                     )
                     .order_by(Memory.updated_at.desc())
-                    .limit(20)
+                    .limit(50)
                     .all()
                 )
                 for dm in domain_memories:

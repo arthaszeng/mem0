@@ -27,7 +27,7 @@ def _get_memory_client_safe():
         return None
 
 
-def _search_memories_sync(client, query: str, user_id: str, limit: int = 10):
+def _search_memories_sync(client, query: str, user_id: str, limit: int = 50):
     from qdrant_client.models import Filter, FieldCondition, MatchValue
 
     emb = client.embedding_model.embed(query, "search")
@@ -69,7 +69,7 @@ def register_prompts(mcp, user_id_var, client_name_var):
         if not client:
             return "Memory system unavailable. Please try again later."
 
-        hits = await asyncio.to_thread(_search_memories_sync, client, topic, uid, 15)
+        hits = await asyncio.to_thread(_search_memories_sync, client, topic, uid, 50)
 
         results = []
         for h in hits:
@@ -258,7 +258,7 @@ def register_prompts(mcp, user_id_var, client_name_var):
 
         for query, label in zip(queries, all_results.keys()):
             hits = await asyncio.to_thread(
-                _search_memories_sync, client, query, uid, 10
+                _search_memories_sync, client, query, uid, 30
             )
             for h in hits:
                 hid = str(h.id)

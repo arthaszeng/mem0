@@ -38,6 +38,7 @@ import { HiMiniRectangleStack } from "react-icons/hi2";
 import { PiSwatches } from "react-icons/pi";
 import { GoPackage } from "react-icons/go";
 import { CiCalendar } from "react-icons/ci";
+import { TbWorldSearch } from "react-icons/tb";
 import { useRouter } from "next/navigation";
 import Categories from "@/components/shared/categories";
 import { useUI } from "@/hooks/useUI";
@@ -139,6 +140,12 @@ export function MemoryTable() {
             </TableHead>
             <TableHead className="w-[140px] border-zinc-700">
               <div className="flex items-center">
+                <TbWorldSearch className="mr-1" size={15} />
+                Domain
+              </div>
+            </TableHead>
+            <TableHead className="w-[140px] border-zinc-700">
+              <div className="flex items-center">
                 <GoPackage className="mr-1" />
                 Source App
               </div>
@@ -222,6 +229,15 @@ export function MemoryTable() {
                     concat={true}
                   />
                 </div>
+              </TableCell>
+              <TableCell className="w-[140px] text-center">
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                  memory.state === "paused" || memory.state === "archived"
+                    ? "border-zinc-700 text-zinc-500"
+                    : "border-zinc-600 text-zinc-300"
+                }`}>
+                  {memory.domain}
+                </span>
               </TableCell>
               <TableCell className="w-[140px] text-center">
                 <SourceApp source={memory.app_name} />

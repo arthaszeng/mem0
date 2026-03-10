@@ -1,4 +1,5 @@
 export const COOKIE_NAME = "om_session";
+export const USER_COOKIE_NAME = "om_user";
 export const TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 async function getHmacKey(secret: string): Promise<CryptoKey> {

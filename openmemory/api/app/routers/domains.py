@@ -30,7 +30,6 @@ class DomainEntry(BaseModel):
     display: str
     aliases: List[str]
     keywords: List[str]
-    category: Optional[str] = None
 
 
 class AddDomainRequest(BaseModel):
@@ -38,7 +37,6 @@ class AddDomainRequest(BaseModel):
     display: str
     aliases: List[str]
     keywords: List[str]
-    category: Optional[str] = None
 
 
 class PromoteCandidateRequest(BaseModel):
@@ -76,7 +74,6 @@ async def create_or_update_domain(req: AddDomainRequest) -> Dict[str, Any]:
         display=req.display,
         aliases=req.aliases,
         keywords=req.keywords,
-        category=req.category,
     )
     return {"message": f"Domain '{req.name}' saved", "count": len(result)}
 

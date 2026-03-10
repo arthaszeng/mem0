@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import axios from 'axios';
+import api from '@/lib/api';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
 import {
@@ -7,6 +7,9 @@ import {
   setCategoriesLoading,
   setCategoriesSuccess,
   setCategoriesError,
+  setDomainsLoading,
+  setDomainsSuccess,
+  setDomainsError,
   setSortingState,
   setSelectedApps,
   setSelectedCategories
@@ -17,8 +20,14 @@ interface CategoriesResponse {
   total: number;
 }
 
+interface DomainsResponse {
+  domains: string[];
+  total: number;
+}
+
 export interface UseFiltersApiReturn {
   fetchCategories: () => Promise<void>;
+  fetchDomains: () => Promise<void>;
   isLoading: boolean;
   error: string | null;
   updateApps: (apps: string[]) => void;
@@ -32,14 +41,12 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
   const dispatch = useDispatch<AppDispatch>();
   const user_id = useSelector((state: RootState) => state.profile.userId);
 
-  const URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
-
   const fetchCategories = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     dispatch(setCategoriesLoading());
     try {
-      const response = await axios.get<CategoriesResponse>(
-        `${URL}/api/v1/memories/categories?user_id=${user_id}`
+      const response = await api.get<CategoriesResponse>(
+        `/api/v1/memories/categories?user_id=${user_id}`
       );
 
       dispatch(setCategoriesSuccess({
@@ -53,6 +60,22 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
       dispatch(setCategoriesError(errorMessage));
       setIsLoading(false);
       throw new Error(errorMessage);
+    }
+  }, [dispatch, user_id]);
+
+  const fetchDomains = useCallback(async (): Promise<void> => {
+    dispatch(setDomainsLoading());
+    try {
+      const response = await api.get<DomainsResponse>(
+        `/api/v1/memories/domains?user_id=${user_id}`
+      );
+      dispatch(setDomainsSuccess({
+        domains: response.data.domains,
+        total: response.data.total
+      }));
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to fetch domains';
+      dispatch(setDomainsError(errorMessage));
     }
   }, [dispatch, user_id]);
 
@@ -70,6 +93,7 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
 
   return {
     fetchCategories,
+    fetchDomains,
     isLoading,
     error,
     updateApps,
