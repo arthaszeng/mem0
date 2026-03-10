@@ -9,6 +9,7 @@ export interface Memory {
   categories: Category[]
   created_at: number
   app_name: string
+  created_by: string | null
   domain: string
   state: "active" | "paused" | "archived" | "deleted"
 }

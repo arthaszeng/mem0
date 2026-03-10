@@ -163,13 +163,15 @@ async def search_memories_semantic(
     matched_domain = match_domain_by_keywords(request.query)
     if matched_domain:
         seen_ids = {r["id"] for r in results}
-        domain_q = db.query(Memory).filter(
-            Memory.user_id == user.id,
+        domain_filters = [
             Memory.state == MemoryState.active,
             Memory.metadata_.op("->>")("domain") == matched_domain,
-        )
+        ]
         if pctx:
-            domain_q = domain_q.filter(Memory.project_id == pctx.project_id)
+            domain_filters.append(Memory.project_id == pctx.project_id)
+        else:
+            domain_filters.append(Memory.user_id == user.id)
+        domain_q = db.query(Memory).filter(*domain_filters)
         domain_memories = domain_q.limit(request.limit).all()
         for dm in domain_memories:
             mid = str(dm.id)
@@ -217,12 +219,13 @@ async def list_memories(
     user = auth.db_user
 
     base_filters = [
-        Memory.user_id == user.id,
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
     ]
     if pctx:
         base_filters.append(Memory.project_id == pctx.project_id)
+    else:
+        base_filters.append(Memory.user_id == user.id)
 
     if search_query:
         matched_domain = match_domain_by_keywords(search_query)
@@ -280,6 +283,7 @@ async def list_memories(
                 state=memory.state.value,
                 app_id=memory.app_id,
                 app_name=memory.app.name if memory.app else None,
+                created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
                 metadata_=memory.metadata_
             )
@@ -300,9 +304,11 @@ async def get_categories(
     pctx = resolve_project(auth, db, project_slug)
     user = auth.db_user
 
-    q = db.query(Memory).filter(Memory.user_id == user.id, Memory.state != MemoryState.deleted, Memory.state != MemoryState.archived)
+    q = db.query(Memory).filter(Memory.state != MemoryState.deleted, Memory.state != MemoryState.archived)
     if pctx:
         q = q.filter(Memory.project_id == pctx.project_id)
+    else:
+        q = q.filter(Memory.user_id == user.id)
     memories = q.all()
     categories = [category for memory in memories for category in memory.categories]
     unique_categories = list(set(categories))
@@ -323,14 +329,16 @@ async def get_domains(
     pctx = resolve_project(auth, db, project_slug)
     user = auth.db_user
 
-    domain_q = db.query(func.json_extract(Memory.metadata_, "$.domain")).filter(
-        Memory.user_id == user.id,
+    domain_filters = [
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
         Memory.metadata_.isnot(None),
-    )
+    ]
     if pctx:
-        domain_q = domain_q.filter(Memory.project_id == pctx.project_id)
+        domain_filters.append(Memory.project_id == pctx.project_id)
+    else:
+        domain_filters.append(Memory.user_id == user.id)
+    domain_q = db.query(func.json_extract(Memory.metadata_, "$.domain")).filter(*domain_filters)
     results = domain_q.distinct().all()
     domains = sorted([r[0] for r in results if r[0]])
     return {"domains": domains, "total": len(domains)}
@@ -480,7 +488,7 @@ async def create_memory(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.normal)
+    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.read_write)
     user = auth.db_user
 
     app_obj = db.query(App).filter(App.name == request.app,
@@ -497,7 +505,7 @@ async def create_memory(
 
     from app.models import categorize_memory_background
 
-    logging.info(f"Creating memory for user_id: {request.user_id} with app: {request.app}")
+    logging.info(f"Creating memory for user: {auth.username} with app: {request.app}")
 
     safe_text = sanitize_text(request.text)
 
@@ -605,6 +613,7 @@ async def get_memory(
         "state": memory.state.value,
         "app_id": memory.app_id,
         "app_name": memory.app.name if memory.app else None,
+        "created_by": memory.user.user_id if memory.user else None,
         "categories": [category.name for category in memory.categories],
         "metadata_": memory.metadata_
     }
@@ -622,7 +631,7 @@ async def delete_memories(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.normal)
+    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.read_write)
     user = auth.db_user
 
     # Get memory client to delete from vector store
@@ -642,8 +651,13 @@ async def delete_memories(
             detail=f"Memory service unavailable: {str(client_error)}"
         )
 
-    # Delete from vector store then mark as deleted in database
     for memory_id in request.memory_ids:
+        memory = get_memory_or_404(db, memory_id)
+        if not auth.is_superadmin and memory.user_id != user.id:
+            raise HTTPException(403, f"No permission to delete memory {memory_id}")
+        if pctx and memory.project_id != pctx.project_id:
+            raise HTTPException(403, f"Memory {memory_id} does not belong to this project")
+
         try:
             memory_client.delete(str(memory_id))
         except Exception as delete_error:
@@ -654,16 +668,28 @@ async def delete_memories(
     return {"message": f"Successfully deleted {len(request.memory_ids)} memories"}
 
 
-# Archive memories
+class ArchiveMemoriesRequest(BaseModel):
+    memory_ids: List[UUID]
+    project_slug: Optional[str] = None
+
+
 @router.post("/actions/archive")
 async def archive_memories(
-    memory_ids: List[UUID],
-    user_id: UUID,
-    db: Session = Depends(get_db)
+    request: ArchiveMemoriesRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    for memory_id in memory_ids:
-        update_memory_state(db, memory_id, MemoryState.archived, user_id)
-    return {"message": f"Successfully archived {len(memory_ids)} memories"}
+    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.read_write)
+    user = auth.db_user
+
+    for memory_id in request.memory_ids:
+        memory = get_memory_or_404(db, memory_id)
+        if not auth.is_superadmin and memory.user_id != user.id:
+            raise HTTPException(403, f"No permission to archive memory {memory_id}")
+        if pctx and memory.project_id != pctx.project_id:
+            raise HTTPException(403, f"Memory {memory_id} does not belong to this project")
+        update_memory_state(db, memory_id, MemoryState.archived, user.id)
+    return {"message": f"Successfully archived {len(request.memory_ids)} memories"}
 
 
 class PauseMemoriesRequest(BaseModel):
@@ -693,11 +719,13 @@ async def pause_memories(
     user_id = user.id
     
     if global_pause:
-        # Pause all memories
-        memories = db.query(Memory).filter(
+        q = db.query(Memory).filter(
             Memory.state != MemoryState.deleted,
-            Memory.state != MemoryState.archived
-        ).all()
+            Memory.state != MemoryState.archived,
+        )
+        if not auth.is_superadmin:
+            q = q.filter(Memory.user_id == user.id)
+        memories = q.all()
         for memory in memories:
             update_memory_state(db, memory.id, state, user_id)
         return {"message": "Successfully paused all memories"}
@@ -732,12 +760,14 @@ async def pause_memories(
         return {"message": f"Successfully paused {len(memory_ids)} memories"}
 
     if category_ids:
-        # Pause memories by category
-        memories = db.query(Memory).join(Memory.categories).filter(
+        q = db.query(Memory).join(Memory.categories).filter(
             Category.id.in_(category_ids),
             Memory.state != MemoryState.deleted,
-            Memory.state != MemoryState.archived
-        ).all()
+            Memory.state != MemoryState.archived,
+        )
+        if not auth.is_superadmin:
+            q = q.filter(Memory.user_id == user.id)
+        memories = q.all()
         for memory in memories:
             update_memory_state(db, memory.id, state, user_id)
         return {"message": f"Successfully paused memories in {len(category_ids)} categories"}
@@ -816,11 +846,12 @@ async def filter_memories(
     user = auth.db_user
 
     base_project_filters = [
-        Memory.user_id == user.id,
         Memory.state != MemoryState.deleted,
     ]
     if pctx:
         base_project_filters.append(Memory.project_id == pctx.project_id)
+    else:
+        base_project_filters.append(Memory.user_id == user.id)
 
     query = db.query(Memory).filter(*base_project_filters)
 
@@ -907,6 +938,7 @@ async def filter_memories(
                 state=memory.state.value,
                 app_id=memory.app_id,
                 app_name=memory.app.name if memory.app else None,
+                created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
                 metadata_=memory.metadata_
             )
@@ -934,11 +966,16 @@ async def get_related_memories(
     if not category_ids:
         return Page.create([], total=0, params=params)
     
-    # Build query for related memories
-    query = db.query(Memory).distinct(Memory.id).filter(
-        Memory.user_id == user.id,
+    related_filters = [
         Memory.id != memory_id,
-        Memory.state != MemoryState.deleted
+        Memory.state != MemoryState.deleted,
+    ]
+    if memory.project_id:
+        related_filters.append(Memory.project_id == memory.project_id)
+    else:
+        related_filters.append(Memory.user_id == user.id)
+    query = db.query(Memory).distinct(Memory.id).filter(
+        *related_filters
     ).join(Memory.categories).filter(
         Category.id.in_(category_ids)
     ).options(
@@ -963,6 +1000,7 @@ async def get_related_memories(
                 state=memory.state.value,
                 app_id=memory.app_id,
                 app_name=memory.app.name if memory.app else None,
+                created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
                 metadata_=memory.metadata_
             )

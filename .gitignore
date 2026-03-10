@@ -188,3 +188,4 @@ qdrant_storage/
 testing.ipynb
 *.tar
 *.tar.gz
+openmemory/ui/tsconfig.tsbuildinfo

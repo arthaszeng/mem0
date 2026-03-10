@@ -12,9 +12,9 @@ import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import Image from "next/image";
 import { useStats } from "@/hooks/useStats";
 import { useAppsApi } from "@/hooks/useAppsApi";
-import { Settings, LogOut, Key, FolderKanban, Users, ChevronDown } from "lucide-react";
+import { LogOut, FolderKanban, ChevronDown, ShieldCheck, UserPlus, Copy, X, Check } from "lucide-react";
 import { useConfig } from "@/hooks/useConfig";
-import { deleteCookie } from "@/lib/auth";
+import { deleteCookie, getCookie, TOKEN_COOKIE, decodeJwtPayload } from "@/lib/auth";
 import api from "@/lib/api";
 import {
   DropdownMenu,
@@ -22,10 +22,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
-const GLOBAL_ROUTES = ["/login", "/change-password", "/projects", "/api-keys", "/admin", "/settings"];
+const GLOBAL_ROUTES = ["/login", "/change-password", "/settings", "/invite"];
 
 function extractProjectSlug(pathname: string): string {
   if (GLOBAL_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"))) return "";
@@ -37,6 +45,26 @@ interface ProjectInfo {
   id: string;
   name: string;
   slug: string;
+  my_role?: string;
+}
+
+interface InviteRecord {
+  id: string;
+  token: string;
+  role: string;
+  status: string;
+  created_by: string | null;
+  accepted_by: string | null;
+  expires_at: string | null;
+  created_at: string | null;
+  accepted_at: string | null;
+}
+
+interface MemberRecord {
+  id: string;
+  username: string;
+  role: string;
+  created_at: string | null;
 }
 
 export function Navbar() {
@@ -45,6 +73,7 @@ export function Navbar() {
   const projectSlug = extractProjectSlug(pathname);
 
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -55,9 +84,73 @@ export function Navbar() {
 
   useEffect(() => {
     loadProjects();
-  }, [loadProjects]);
+    const token = getCookie(TOKEN_COOKIE);
+    if (token) {
+      const payload = decodeJwtPayload(token);
+      setIsSuperadmin(!!payload?.is_superadmin);
+    } else {
+      setIsSuperadmin(false);
+    }
+  }, [loadProjects, pathname]);
 
   const currentProject = projects.find((p) => p.slug === projectSlug);
+  const canInvite = isSuperadmin || currentProject?.my_role === "owner" || currentProject?.my_role === "admin";
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteRole, setInviteRole] = useState("read_write");
+  const [inviteExpiry, setInviteExpiry] = useState(7);
+  const [invites, setInvites] = useState<InviteRecord[]>([]);
+  const [members, setMembers] = useState<MemberRecord[]>([]);
+  const [createdLink, setCreatedLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const loadInvitePanel = useCallback(async () => {
+    if (!projectSlug) return;
+    try {
+      const [invRes, memRes] = await Promise.all([
+        api.get(`/api/v1/projects/${projectSlug}/invites`),
+        api.get(`/api/v1/projects/${projectSlug}/members`),
+      ]);
+      setInvites(invRes.data);
+      setMembers(memRes.data);
+    } catch { /* ignore */ }
+  }, [projectSlug]);
+
+  useEffect(() => {
+    if (inviteOpen) loadInvitePanel();
+  }, [inviteOpen, loadInvitePanel]);
+
+  const handleCreateInvite = async () => {
+    try {
+      const res = await api.post(`/api/v1/projects/${projectSlug}/invites`, {
+        role: inviteRole,
+        expires_in_days: inviteExpiry,
+      });
+      const token = res.data.token;
+      const link = `${window.location.origin}${basePath}/invite/${token}`;
+      setCreatedLink(link);
+      loadInvitePanel();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed to create invite");
+    }
+  };
+
+  const handleRevokeInvite = async (token: string) => {
+    try {
+      await api.post(`/api/v1/projects/${projectSlug}/invites/revoke`, { token });
+      loadInvitePanel();
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed to revoke invite");
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (createdLink) {
+      navigator.clipboard.writeText(createdLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const memoriesApi = useMemoriesApi();
   const appsApi = useAppsApi();
@@ -215,42 +308,17 @@ export function Navbar() {
                 </Link>
               </>
             )}
-            <Link href="/projects">
-              <Button
-                variant="outline"
-                size="sm"
-                className={`flex items-center gap-2 border-none ${pathname.startsWith("/projects") ? activeClass : inactiveClass}`}
-              >
-                <FolderKanban className="h-4 w-4" /> Projects
-              </Button>
-            </Link>
-            <Link href="/api-keys">
-              <Button
-                variant="outline"
-                size="sm"
-                className={`flex items-center gap-2 border-none ${pathname.startsWith("/api-keys") ? activeClass : inactiveClass}`}
-              >
-                <Key className="h-4 w-4" /> API Keys
-              </Button>
-            </Link>
-            <Link href="/admin/users">
-              <Button
-                variant="outline"
-                size="sm"
-                className={`flex items-center gap-2 border-none ${pathname.startsWith("/admin") ? activeClass : inactiveClass}`}
-              >
-                <Users className="h-4 w-4" /> Users
-              </Button>
-            </Link>
-            <Link href="/settings">
-              <Button
-                variant="outline"
-                size="sm"
-                className={`flex items-center gap-2 border-none ${pathname.startsWith("/settings") ? activeClass : inactiveClass}`}
-              >
-                <Settings /> Settings
-              </Button>
-            </Link>
+            {isSuperadmin && (
+              <Link href="/settings">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={`flex items-center gap-2 border-none ${pathname.startsWith("/settings") ? activeClass : inactiveClass}`}
+                >
+                  <ShieldCheck className="h-4 w-4" /> Admin Settings
+                </Button>
+              </Link>
+            )}
           </div>
         )}
 
@@ -265,6 +333,83 @@ export function Navbar() {
               <FiRefreshCcw className="transition-transform duration-300 group-hover:rotate-180" />
               Refresh
             </Button>
+            {canInvite && projectSlug && (
+              <Dialog open={inviteOpen} onOpenChange={(open) => { setInviteOpen(open); if (!open) { setCreatedLink(null); setCopied(false); } }}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="flex items-center gap-2 border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
+                    <UserPlus className="h-4 w-4" /> Invite
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="bg-zinc-900 border-zinc-700 max-w-lg max-h-[80vh] overflow-y-auto">
+                  <DialogHeader><DialogTitle>Invite to {currentProject?.name || projectSlug}</DialogTitle></DialogHeader>
+
+                  <div className="space-y-4">
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <Label className="text-xs text-zinc-400">Role</Label>
+                        <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1">
+                          <option value="read_only">Read Only</option>
+                          <option value="read_write">Read / Write</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
+                      <div className="w-24">
+                        <Label className="text-xs text-zinc-400">Expires (days)</Label>
+                        <input type="number" min={1} max={365} value={inviteExpiry} onChange={(e) => setInviteExpiry(Number(e.target.value))} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1" />
+                      </div>
+                      <Button size="sm" onClick={handleCreateInvite}>Create Link</Button>
+                    </div>
+
+                    {createdLink && (
+                      <div className="flex items-center gap-2 rounded-md bg-zinc-800 border border-zinc-700 p-2">
+                        <input readOnly value={createdLink} className="flex-1 bg-transparent text-xs text-zinc-200 outline-none" />
+                        <Button size="sm" variant="ghost" onClick={handleCopyLink} className="h-7 w-7 p-0">
+                          {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    )}
+
+                    <div>
+                      <h4 className="text-sm font-medium text-zinc-300 mb-2">Team Members ({members.length})</h4>
+                      {members.length === 0 ? <p className="text-xs text-zinc-500">No members yet.</p> : (
+                        <div className="space-y-1">
+                          {members.map((m) => (
+                            <div key={m.id} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-1.5">
+                              <span className="text-sm text-white">{m.username}</span>
+                              <span className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300">{m.role}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium text-zinc-300 mb-2">Invite History ({invites.length})</h4>
+                      {invites.length === 0 ? <p className="text-xs text-zinc-500">No invites yet.</p> : (
+                        <div className="space-y-1">
+                          {invites.map((inv) => (
+                            <div key={inv.id} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-1.5">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs text-zinc-400">
+                                  {`${inv.role} \u00B7 ${inv.status}`}
+                                  {inv.accepted_by && ` by ${inv.accepted_by}`}
+                                  {inv.created_at && ` \u00B7 ${new Date(inv.created_at).toLocaleDateString()}`}
+                                </span>
+                              </div>
+                              {inv.status === "pending" && (
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-400 hover:text-red-300" onClick={() => handleRevokeInvite(inv.token)}>
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
             <CreateMemoryDialog />
             <Button
               onClick={handleLogout}

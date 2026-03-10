@@ -13,6 +13,7 @@ export interface SimpleMemory {
   state: string;
   categories: string[];
   app_name: string;
+  created_by?: string;
 }
 
 interface ApiMemoryItem {
@@ -24,6 +25,7 @@ interface ApiMemoryItem {
   categories: string[];
   metadata_?: Record<string, any>;
   app_name: string;
+  created_by?: string;
 }
 
 interface ApiResponse {
@@ -144,6 +146,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         categories: item.categories as Category[],
         client: 'api',
         app_name: item.app_name,
+        created_by: item.created_by || null,
         domain: item.metadata_?.domain || "General",
       }));
       setIsLoading(false);

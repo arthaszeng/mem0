@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, require_superadmin
 from models import ApiKey, User
 from schemas import CreateApiKeyRequest, CreateApiKeyResponse
 
@@ -67,6 +67,47 @@ def revoke_api_key(
     db: Session = Depends(get_db),
 ):
     api_key = db.query(ApiKey).filter(ApiKey.id == key_id, ApiKey.user_id == user.id).first()
+    if not api_key:
+        raise HTTPException(404, "API key not found")
+    api_key.is_active = False
+    db.commit()
+    return {"message": "API key revoked"}
+
+
+# ---- Admin endpoints (superadmin only) ----
+
+@router.get("/admin/all")
+def list_all_api_keys(
+    admin: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    keys = (
+        db.query(ApiKey, User.username)
+        .join(User, ApiKey.user_id == User.id)
+        .order_by(ApiKey.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": k.id,
+            "name": k.name,
+            "key_prefix": k.key_prefix,
+            "is_active": k.is_active,
+            "created_at": k.created_at.isoformat() if k.created_at else None,
+            "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+            "username": username,
+        }
+        for k, username in keys
+    ]
+
+
+@router.delete("/admin/{key_id}")
+def admin_revoke_api_key(
+    key_id: str,
+    admin: User = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    api_key = db.query(ApiKey).filter(ApiKey.id == key_id).first()
     if not api_key:
         raise HTTPException(404, "API key not found")
     api_key.is_active = False

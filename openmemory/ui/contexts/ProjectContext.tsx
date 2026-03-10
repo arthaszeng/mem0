@@ -15,6 +15,7 @@ interface ProjectContextValue {
   project: ProjectInfo | null;
   projects: ProjectInfo[];
   loading: boolean;
+  notFound: boolean;
   refreshProjects: () => Promise<void>;
 }
 
@@ -23,6 +24,7 @@ const ProjectContext = createContext<ProjectContextValue>({
   project: null,
   projects: [],
   loading: true,
+  notFound: false,
   refreshProjects: async () => {},
 });
 
@@ -56,10 +58,11 @@ export function ProjectProvider({
   }, [refreshProjects]);
 
   const project = projects.find((p) => p.slug === slug) ?? null;
+  const notFound = !loading && slug !== "" && project === null;
 
   return (
     <ProjectContext.Provider
-      value={{ projectSlug: slug, project, projects, loading, refreshProjects }}
+      value={{ projectSlug: slug, project, projects, loading, notFound, refreshProjects }}
     >
       {children}
     </ProjectContext.Provider>

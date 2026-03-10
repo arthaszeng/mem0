@@ -37,9 +37,10 @@ class MemoryState(enum.Enum):
 
 
 class ProjectRole(enum.Enum):
+    owner = "owner"
     admin = "admin"
-    normal = "normal"
-    read = "read"
+    read_write = "read_write"
+    read_only = "read_only"
 
 
 class Project(Base):
@@ -61,7 +62,7 @@ class ProjectMember(Base):
     id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
     project_id = Column(UUID, ForeignKey("projects.id"), nullable=False, index=True)
     user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    role = Column(Enum(ProjectRole), nullable=False, default=ProjectRole.normal)
+    role = Column(Enum(ProjectRole), nullable=False, default=ProjectRole.read_write)
     created_at = Column(DateTime, default=get_current_utc_time)
 
     project = relationship("Project", back_populates="members")
@@ -69,6 +70,35 @@ class ProjectMember(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "user_id", name="uq_project_user"),
+    )
+
+
+class InviteStatus(enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    revoked = "revoked"
+    expired = "expired"
+
+
+class ProjectInvite(Base):
+    __tablename__ = "project_invites"
+    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    project_id = Column(UUID, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    token = Column(String, unique=True, nullable=False, index=True)
+    role = Column(Enum(ProjectRole), nullable=False, default=ProjectRole.read_write)
+    status = Column(Enum(InviteStatus), nullable=False, default=InviteStatus.pending)
+    created_by_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    accepted_by_id = Column(UUID, ForeignKey("users.id"), nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=get_current_utc_time, index=True)
+    accepted_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", backref="invites")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    accepted_by = relationship("User", foreign_keys=[accepted_by_id])
+
+    __table_args__ = (
+        Index("idx_invite_project_status", "project_id", "status"),
     )
 
 

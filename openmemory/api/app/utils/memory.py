@@ -72,6 +72,22 @@ def _fix_ollama_urls(config_section):
     return config_section
 
 
+def _apply_env_vector_store_overrides(vs_config):
+    """Let QDRANT_HOST / QDRANT_PORT env vars override DB-stored values so
+    the Docker service name is always correct even if the DB has a stale host."""
+    if not vs_config or "config" not in vs_config:
+        return
+    env_host = os.environ.get("QDRANT_HOST")
+    env_port = os.environ.get("QDRANT_PORT")
+    if env_host:
+        old = vs_config["config"].get("host")
+        if old != env_host:
+            logger.info(f"Overriding vector_store host from env: {old} -> {env_host}")
+            vs_config["config"]["host"] = env_host
+    if env_port:
+        vs_config["config"]["port"] = int(env_port)
+
+
 def reset_memory_client():
     """Reset the global memory client to force reinitialization with new config."""
     global _memory_client, _config_hash, _last_config_check
@@ -273,6 +289,7 @@ def get_memory_client(custom_instructions: str = None):
                             logger.info("FORCE_OPENAI set — ignoring DB 768-dim vector_store config, using 1536-dim defaults")
                         else:
                             config["vector_store"] = mem0_config["vector_store"]
+                            _apply_env_vector_store_overrides(config["vector_store"])
 
             db.close()
 

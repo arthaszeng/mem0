@@ -98,7 +98,7 @@ def migrate():
         member_id = str(uuid.uuid4())
         om.execute(
             "INSERT INTO project_members (id, project_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
-            (member_id, project_id, admin_om_id, "admin", now),
+            (member_id, project_id, admin_om_id, "owner", now),
         )
         om.commit()
         step(f"Created default project: id={project_id}")

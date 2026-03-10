@@ -39,6 +39,7 @@ import { PiSwatches } from "react-icons/pi";
 import { GoPackage } from "react-icons/go";
 import { CiCalendar } from "react-icons/ci";
 import { TbWorldSearch } from "react-icons/tb";
+import { FiUser } from "react-icons/fi";
 import { useRouter } from "next/navigation";
 import Categories from "@/components/shared/categories";
 import { useUI } from "@/hooks/useUI";
@@ -144,6 +145,12 @@ export function MemoryTable() {
                 Domain
               </div>
             </TableHead>
+            <TableHead className="w-[120px] border-zinc-700">
+              <div className="flex items-center">
+                <FiUser className="mr-1" size={14} />
+                Created By
+              </div>
+            </TableHead>
             <TableHead className="w-[140px] border-zinc-700">
               <div className="flex items-center">
                 <GoPackage className="mr-1" />
@@ -237,6 +244,11 @@ export function MemoryTable() {
                     : "border-zinc-600 text-zinc-300"
                 }`}>
                   {memory.domain}
+                </span>
+              </TableCell>
+              <TableCell className="w-[120px]">
+                <span className="text-sm text-zinc-300">
+                  {memory.created_by || "-"}
                 </span>
               </TableCell>
               <TableCell className="w-[140px] text-center">

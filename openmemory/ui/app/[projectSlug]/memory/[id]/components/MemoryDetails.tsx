@@ -103,31 +103,33 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                     />
                   </div>
                   <div className="flex items-center gap-2 min-w-[300px] justify-end">
-                    <div className="flex items-center gap-2">
+                    {memory?.created_by && (
                       <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
-                        <span className="text-sm text-zinc-400">
-                          Created by:
-                        </span>
-                        <div className="w-4 h-4 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
-                          <Image
-                            src={
-                              constants[
-                                memory?.app_name as keyof typeof constants
-                              ]?.iconImage || ""
-                            }
-                            alt="OpenMemory"
-                            width={24}
-                            height={24}
-                          />
-                        </div>
-                        <p className="text-sm text-zinc-100 font-semibold">
-                          {
+                        <span className="text-sm text-zinc-400">User:</span>
+                        <p className="text-sm text-zinc-100 font-semibold">{memory.created_by}</p>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
+                      <span className="text-sm text-zinc-400">App:</span>
+                      <div className="w-4 h-4 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
+                        <Image
+                          src={
                             constants[
                               memory?.app_name as keyof typeof constants
-                            ]?.name
+                            ]?.iconImage || ""
                           }
-                        </p>
+                          alt="App"
+                          width={24}
+                          height={24}
+                        />
                       </div>
+                      <p className="text-sm text-zinc-100 font-semibold">
+                        {
+                          constants[
+                            memory?.app_name as keyof typeof constants
+                          ]?.name
+                        }
+                      </p>
                     </div>
                   </div>
                 </div>

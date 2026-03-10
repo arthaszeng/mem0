@@ -18,7 +18,12 @@ from app.models import App, Project, ProjectMember, ProjectRole, User
 
 logger = logging.getLogger(__name__)
 
-ROLE_LEVEL = {ProjectRole.read: 0, ProjectRole.normal: 1, ProjectRole.admin: 2}
+ROLE_LEVEL = {
+    ProjectRole.read_only: 0,
+    ProjectRole.read_write: 1,
+    ProjectRole.admin: 2,
+    ProjectRole.owner: 3,
+}
 
 
 class AuthenticatedUser:
@@ -33,6 +38,44 @@ class AuthenticatedUser:
     @property
     def id(self):
         return self.db_user.id
+
+
+def _slugify(name: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def _ensure_default_project(db: Session, db_user: "User") -> None:
+    """Create a personal default project for a user if none exists."""
+    slug = _slugify(db_user.user_id)
+    existing = db.query(Project).filter(Project.slug == slug).first()
+    if existing:
+        already_member = db.query(ProjectMember).filter(
+            ProjectMember.project_id == existing.id,
+            ProjectMember.user_id == db_user.id,
+        ).first()
+        if not already_member:
+            db.add(ProjectMember(
+                project_id=existing.id,
+                user_id=db_user.id,
+                role=ProjectRole.owner,
+            ))
+        return
+
+    project = Project(
+        name=f"{db_user.user_id}",
+        slug=slug,
+        owner_id=db_user.id,
+        description="Auto-created personal project",
+    )
+    db.add(project)
+    db.flush()
+    db.add(ProjectMember(
+        project_id=project.id,
+        user_id=db_user.id,
+        role=ProjectRole.owner,
+    ))
+    logger.info("Created default project '%s' for user %s", slug, db_user.user_id)
 
 
 def get_authenticated_user(request: Request, db: Session = Depends(get_db)) -> AuthenticatedUser:
@@ -57,9 +100,20 @@ def get_authenticated_user(request: Request, db: Session = Depends(get_db)) -> A
 
         default_app = App(name="openmemory", owner_id=db_user.id)
         db.add(default_app)
+
+        _ensure_default_project(db, db_user)
+
         db.commit()
         db.refresh(db_user)
         logger.info("Auto-provisioned OpenMemory user: %s", auth_username)
+    else:
+        has_projects = db.query(ProjectMember).filter(
+            ProjectMember.user_id == db_user.id,
+        ).first()
+        if not has_projects:
+            _ensure_default_project(db, db_user)
+            db.commit()
+            logger.info("Created default project for existing user: %s", auth_username)
 
     return AuthenticatedUser(
         user_id=auth_user_id,
@@ -89,7 +143,7 @@ def resolve_project(
     auth: AuthenticatedUser,
     db: Session,
     project_slug: Optional[str],
-    min_role: ProjectRole = ProjectRole.read,
+    min_role: ProjectRole = ProjectRole.read_only,
 ) -> Optional[ProjectContext]:
     """Resolve project from slug and verify the user has at least min_role.
     Returns None if project_slug is None (backward compat for no-project queries)."""
@@ -101,7 +155,7 @@ def resolve_project(
         raise HTTPException(404, f"Project '{project_slug}' not found")
 
     if auth.is_superadmin:
-        return ProjectContext(project, ProjectRole.admin)
+        return ProjectContext(project, ProjectRole.owner)
 
     member = db.query(ProjectMember).filter(
         ProjectMember.project_id == project.id,

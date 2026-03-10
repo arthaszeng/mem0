@@ -19,9 +19,11 @@ async def get_profile(
     pctx = resolve_project(auth, db, project_slug)
     user = auth.db_user
 
-    mem_q = db.query(Memory).filter(Memory.user_id == user.id, Memory.state != MemoryState.deleted)
+    mem_q = db.query(Memory).filter(Memory.state != MemoryState.deleted)
     if pctx:
         mem_q = mem_q.filter(Memory.project_id == pctx.project_id)
+    else:
+        mem_q = mem_q.filter(Memory.user_id == user.id)
     total_memories = mem_q.count()
 
     apps = db.query(App).filter(App.owner_id == user.id)

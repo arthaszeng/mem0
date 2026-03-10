@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
-import { Plus, Trash2, Users, Settings2, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Users, AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +33,7 @@ interface Member {
   joined_at: string;
 }
 
-export default function ProjectsPage() {
+export function ProjectsTab() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -52,45 +52,29 @@ export default function ProjectsPage() {
     try {
       const res = await api.get("/api/v1/projects");
       setProjects(res.data);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
   }, []);
 
   const fetchMembers = useCallback(async (slug: string) => {
     try {
       const res = await api.get(`/api/v1/projects/${slug}/members`);
       setMembers(res.data);
-    } catch {
-      setMembers([]);
-    }
+    } catch { setMembers([]); }
   }, []);
 
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
-
-  useEffect(() => {
-    if (selectedProject) fetchMembers(selectedProject);
-  }, [selectedProject, fetchMembers]);
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+  useEffect(() => { if (selectedProject) fetchMembers(selectedProject); }, [selectedProject, fetchMembers]);
 
   const handleCreate = async () => {
     try {
       await api.post("/api/v1/projects", {
-        name: newName,
-        slug: newSlug || undefined,
-        description: newDesc || undefined,
+        name: newName, slug: newSlug || undefined, description: newDesc || undefined,
       });
       setCreateOpen(false);
-      setNewName("");
-      setNewSlug("");
-      setNewDesc("");
+      setNewName(""); setNewSlug(""); setNewDesc("");
       fetchProjects();
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to create project");
-    }
+    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to create project"); }
   };
 
   const handleDelete = async () => {
@@ -109,86 +93,52 @@ export default function ProjectsPage() {
   const handleAddMember = async () => {
     if (!selectedProject) return;
     try {
-      await api.post(`/api/v1/projects/${selectedProject}/members`, {
-        username: newMemberUsername,
-        role: newMemberRole,
-      });
-      setAddMemberOpen(false);
-      setNewMemberUsername("");
-      setNewMemberRole("read_write");
+      await api.post(`/api/v1/projects/${selectedProject}/members`, { username: newMemberUsername, role: newMemberRole });
+      setAddMemberOpen(false); setNewMemberUsername(""); setNewMemberRole("read_write");
       fetchMembers(selectedProject);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to add member");
-    }
+    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to add member"); }
   };
 
   const handleRemoveMember = async (username: string) => {
     if (!selectedProject) return;
-    try {
-      await api.delete(`/api/v1/projects/${selectedProject}/members/${username}`);
-      fetchMembers(selectedProject);
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to remove member");
-    }
+    try { await api.delete(`/api/v1/projects/${selectedProject}/members/${username}`); fetchMembers(selectedProject); }
+    catch (err: any) { alert(err?.response?.data?.detail || "Failed to remove member"); }
   };
 
   return (
-    <div className="container mx-auto max-w-4xl py-8">
+    <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-white">Projects</h1>
+        <div>
+          <h2 className="text-xl font-semibold text-white">Projects</h2>
+          <p className="text-sm text-zinc-400 mt-1">Manage projects and their members</p>
+        </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-2">
-              <Plus className="h-4 w-4" /> New Project
-            </Button>
+            <Button size="sm" className="gap-2"><Plus className="h-4 w-4" /> New Project</Button>
           </DialogTrigger>
           <DialogContent className="bg-zinc-900 border-zinc-700">
-            <DialogHeader>
-              <DialogTitle>Create Project</DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Create Project</DialogTitle></DialogHeader>
             <div className="space-y-4 py-2">
-              <div>
-                <Label>Name</Label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="My Project" className="bg-zinc-800 border-zinc-700" />
-              </div>
-              <div>
-                <Label>Slug (optional, auto-generated)</Label>
-                <Input value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="my-project" className="bg-zinc-800 border-zinc-700" />
-              </div>
-              <div>
-                <Label>Description</Label>
-                <Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Description..." className="bg-zinc-800 border-zinc-700" />
-              </div>
+              <div><Label>Name</Label><Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="My Project" className="bg-zinc-800 border-zinc-700" /></div>
+              <div><Label>Slug (optional)</Label><Input value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="my-project" className="bg-zinc-800 border-zinc-700" /></div>
+              <div><Label>Description</Label><Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Description..." className="bg-zinc-800 border-zinc-700" /></div>
             </div>
-            <DialogFooter>
-              <Button onClick={handleCreate} disabled={!newName.trim()}>Create</Button>
-            </DialogFooter>
+            <DialogFooter><Button onClick={handleCreate} disabled={!newName.trim()}>Create</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      {loading ? (
-        <p className="text-zinc-400">Loading...</p>
-      ) : projects.length === 0 ? (
+      {loading ? <p className="text-zinc-400">Loading...</p> : projects.length === 0 ? (
         <p className="text-zinc-400">No projects yet. Create one to get started.</p>
       ) : (
         <div className="grid gap-4">
           {projects.map((p) => (
-            <div
-              key={p.id}
-              className={`rounded-lg border p-4 cursor-pointer transition-colors ${
-                selectedProject === p.slug
-                  ? "border-blue-500 bg-zinc-800/80"
-                  : "border-zinc-700 bg-zinc-900 hover:bg-zinc-800/50"
-              }`}
-              onClick={() => setSelectedProject(p.slug === selectedProject ? null : p.slug)}
-            >
+            <div key={p.id} className={`rounded-lg border p-4 cursor-pointer transition-colors ${selectedProject === p.slug ? "border-blue-500 bg-zinc-800/80" : "border-zinc-700 bg-zinc-900 hover:bg-zinc-800/50"}`}
+              onClick={() => setSelectedProject(p.slug === selectedProject ? null : p.slug)}>
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-white">{p.name}</h3>
-                  <p className="text-sm text-zinc-400">
-                    slug: {p.slug} &middot; owner: {p.owner_username} &middot; {p.member_count} member(s)
-                  </p>
+                  <p className="text-sm text-zinc-400">slug: {p.slug} &middot; owner: {p.owner_username} &middot; {p.member_count} member(s)</p>
                   {p.description && <p className="text-sm text-zinc-500 mt-1">{p.description}</p>}
                 </div>
                 <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-300 hover:bg-red-900/20" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ slug: p.slug, name: p.name }); }}>
@@ -199,22 +149,15 @@ export default function ProjectsPage() {
               {selectedProject === p.slug && (
                 <div className="mt-4 border-t border-zinc-700 pt-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-medium text-zinc-300 flex items-center gap-2">
-                      <Users className="h-4 w-4" /> Members
-                    </h4>
+                    <h4 className="text-sm font-medium text-zinc-300 flex items-center gap-2"><Users className="h-4 w-4" /> Members</h4>
                     <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
                       <DialogTrigger asChild>
-                        <Button size="sm" variant="outline" className="gap-1 text-xs border-zinc-600">
-                          <Plus className="h-3 w-3" /> Add Member
-                        </Button>
+                        <Button size="sm" variant="outline" className="gap-1 text-xs border-zinc-600"><Plus className="h-3 w-3" /> Add Member</Button>
                       </DialogTrigger>
                       <DialogContent className="bg-zinc-900 border-zinc-700">
                         <DialogHeader><DialogTitle>Add Member</DialogTitle></DialogHeader>
                         <div className="space-y-4 py-2">
-                          <div>
-                            <Label>Username</Label>
-                            <Input value={newMemberUsername} onChange={(e) => setNewMemberUsername(e.target.value)} className="bg-zinc-800 border-zinc-700" />
-                          </div>
+                          <div><Label>Username</Label><Input value={newMemberUsername} onChange={(e) => setNewMemberUsername(e.target.value)} className="bg-zinc-800 border-zinc-700" /></div>
                           <div>
                             <Label>Role</Label>
                             <select value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value)} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white">
@@ -224,15 +167,11 @@ export default function ProjectsPage() {
                             </select>
                           </div>
                         </div>
-                        <DialogFooter>
-                          <Button onClick={handleAddMember} disabled={!newMemberUsername.trim()}>Add</Button>
-                        </DialogFooter>
+                        <DialogFooter><Button onClick={handleAddMember} disabled={!newMemberUsername.trim()}>Add</Button></DialogFooter>
                       </DialogContent>
                     </Dialog>
                   </div>
-                  {members.length === 0 ? (
-                    <p className="text-xs text-zinc-500">No members.</p>
-                  ) : (
+                  {members.length === 0 ? <p className="text-xs text-zinc-500">No members.</p> : (
                     <div className="space-y-2">
                       {members.map((m) => (
                         <div key={m.username} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-2">
@@ -261,7 +200,7 @@ export default function ProjectsPage() {
               <AlertTriangle className="h-5 w-5" /> Delete Project
             </DialogTitle>
             <DialogDescription className="text-zinc-400">
-              This will permanently delete <span className="text-white font-semibold">{deleteTarget?.name}</span> and all its memories, invites, and member associations. This cannot be undone.
+              This will permanently delete the project <span className="text-white font-semibold">{deleteTarget?.name}</span> and all its memories, invites, and member associations. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
