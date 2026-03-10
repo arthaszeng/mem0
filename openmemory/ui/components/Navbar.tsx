@@ -13,9 +13,10 @@ import { useStats } from "@/hooks/useStats";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 import { useAppsApi } from "@/hooks/useAppsApi";
-import { Settings, LogOut } from "lucide-react";
+import { Settings, LogOut, Key } from "lucide-react";
 import { useConfig } from "@/hooks/useConfig";
 import { useRouter } from "next/navigation";
+import { deleteCookie } from "@/lib/auth";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -28,6 +29,8 @@ export function Navbar() {
 
   const handleLogout = async () => {
     await fetch(`${basePath}/api/auth/logout`, { method: "POST" });
+    deleteCookie("om_token");
+    deleteCookie("om_user");
     router.push("/login");
     router.refresh();
   };
@@ -142,6 +145,18 @@ export function Navbar() {
             >
               <RiApps2AddFill />
               Apps
+            </Button>
+          </Link>
+          <Link href="/api-keys">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${
+                isActive("/api-keys") ? activeClass : inactiveClass
+              }`}
+            >
+              <Key className="h-4 w-4" />
+              API Keys
             </Button>
           </Link>
           <Link href="/settings">
