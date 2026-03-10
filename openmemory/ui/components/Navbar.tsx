@@ -13,10 +13,10 @@ import { useStats } from "@/hooks/useStats";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 import { useAppsApi } from "@/hooks/useAppsApi";
-import { Settings, LogOut, Key } from "lucide-react";
+import { Settings, LogOut, Key, FolderKanban, Users } from "lucide-react";
 import { useConfig } from "@/hooks/useConfig";
 import { useRouter } from "next/navigation";
-import { deleteCookie } from "@/lib/auth";
+import { deleteCookie, getCookie } from "@/lib/auth";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -147,6 +147,18 @@ export function Navbar() {
               Apps
             </Button>
           </Link>
+          <Link href="/projects">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${
+                isActive("/projects") ? activeClass : inactiveClass
+              }`}
+            >
+              <FolderKanban className="h-4 w-4" />
+              Projects
+            </Button>
+          </Link>
           <Link href="/api-keys">
             <Button
               variant="outline"
@@ -157,6 +169,18 @@ export function Navbar() {
             >
               <Key className="h-4 w-4" />
               API Keys
+            </Button>
+          </Link>
+          <Link href="/admin/users">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${
+                isActive("/admin") ? activeClass : inactiveClass
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              Users
             </Button>
           </Link>
           <Link href="/settings">

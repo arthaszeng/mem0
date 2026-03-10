@@ -5,12 +5,15 @@ Run this ONCE after deploying Phase 1-3 to:
 1. Ensure auth.db has the admin user
 2. Create a default project in OpenMemory and assign all existing memories to it
 3. Ensure the OpenMemory User matches the auth-service admin user
+4. Update Qdrant vector payloads to include project_id
 
 Usage:
     docker exec mem0-openmemory-mcp-1 python3 /scripts/migrate_to_multiuser.py
 
 Or run locally with correct DB paths:
-    AUTH_DB=/path/to/auth.db OPENMEMORY_DB=/path/to/openmemory.db python3 scripts/migrate_to_multiuser.py
+    OPENMEMORY_DB=/path/to/openmemory.db \
+    QDRANT_HOST=localhost QDRANT_PORT=6333 \
+    python3 scripts/migrate_to_multiuser.py
 """
 
 import os
@@ -19,12 +22,22 @@ import sys
 import uuid
 from datetime import datetime, UTC
 
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import PointVectors, SetPayloadOperation, SetPayload
+    HAS_QDRANT = True
+except ImportError:
+    HAS_QDRANT = False
+
 
 AUTH_DB = os.getenv("AUTH_DB", "/data/auth.db")
 OPENMEMORY_DB = os.getenv("OPENMEMORY_DB", "/data/openmemory.db")
 ADMIN_USERNAME = os.getenv("INIT_ADMIN_USER", "arthaszeng")
 DEFAULT_PROJECT_NAME = os.getenv("DEFAULT_PROJECT_NAME", "Default")
 DEFAULT_PROJECT_SLUG = os.getenv("DEFAULT_PROJECT_SLUG", "default")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "openmemory_768")
 
 
 def step(msg: str):
@@ -111,6 +124,57 @@ def migrate():
         step("No orphan memories found")
 
     om.close()
+
+    # 5. Update Qdrant payloads with project_id
+    print(f"\n[5/5] Updating Qdrant payloads with project_id...")
+    if not HAS_QDRANT:
+        step("qdrant-client not installed, skipping Qdrant migration")
+        step("Install with: pip install qdrant-client")
+    else:
+        try:
+            qc = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+            collections = [c.name for c in qc.get_collections().collections]
+            if QDRANT_COLLECTION not in collections:
+                step(f"Collection '{QDRANT_COLLECTION}' not found, skipping")
+            else:
+                step(f"Scanning collection '{QDRANT_COLLECTION}'...")
+                offset = None
+                updated = 0
+                batch_size = 100
+                while True:
+                    result = qc.scroll(
+                        collection_name=QDRANT_COLLECTION,
+                        limit=batch_size,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    points, next_offset = result
+                    if not points:
+                        break
+
+                    ids_to_update = []
+                    for p in points:
+                        payload = p.payload or {}
+                        if "project_id" not in payload or not payload["project_id"]:
+                            ids_to_update.append(p.id)
+
+                    if ids_to_update:
+                        qc.set_payload(
+                            collection_name=QDRANT_COLLECTION,
+                            payload={"project_id": project_id},
+                            points=ids_to_update,
+                        )
+                        updated += len(ids_to_update)
+
+                    if next_offset is None:
+                        break
+                    offset = next_offset
+
+                step(f"Updated {updated} points with project_id={project_id}")
+        except Exception as e:
+            step(f"Qdrant migration failed: {e}")
+            step("You can re-run this script later to retry")
 
     print("\n" + "=" * 60)
     print("Migration complete!")

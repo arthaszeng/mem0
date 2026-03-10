@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import api from '@/lib/api';
-import { useDispatch, useSelector } from 'react-redux';
-import { AppDispatch, RootState } from '@/store/store';
+import { useDispatch } from 'react-redux';
+import { AppDispatch } from '@/store/store';
 import {
   Category,
   setCategoriesLoading,
@@ -39,14 +39,12 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
-  const user_id = useSelector((state: RootState) => state.profile.userId);
-
   const fetchCategories = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     dispatch(setCategoriesLoading());
     try {
       const response = await api.get<CategoriesResponse>(
-        `/api/v1/memories/categories?user_id=${user_id}`
+        `/api/v1/memories/categories`
       );
 
       dispatch(setCategoriesSuccess({
@@ -61,13 +59,13 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
       setIsLoading(false);
       throw new Error(errorMessage);
     }
-  }, [dispatch, user_id]);
+  }, [dispatch]);
 
   const fetchDomains = useCallback(async (): Promise<void> => {
     dispatch(setDomainsLoading());
     try {
       const response = await api.get<DomainsResponse>(
-        `/api/v1/memories/domains?user_id=${user_id}`
+        `/api/v1/memories/domains`
       );
       dispatch(setDomainsSuccess({
         domains: response.data.domains,
@@ -77,7 +75,7 @@ export const useFiltersApi = (): UseFiltersApiReturn => {
       const errorMessage = err.message || 'Failed to fetch domains';
       dispatch(setDomainsError(errorMessage));
     }
-  }, [dispatch, user_id]);
+  }, [dispatch]);
 
   const updateApps = useCallback((apps: string[]) => {
     dispatch(setSelectedApps(apps));

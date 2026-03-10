@@ -1,19 +1,24 @@
 """Read authenticated user info from nginx gateway-injected headers.
 
-This is the ONLY auth code downstream services need. The nginx gateway
-has already verified the token (JWT or API Key) via auth_request and
-injected X-Auth-* headers into the request."""
+The nginx gateway has already verified the token (JWT or API Key) via
+auth_request and injected X-Auth-* headers. This module provides:
+1. get_authenticated_user() — user identity from headers
+2. resolve_project() — project lookup + role-based access check
+"""
 
 import datetime
 import logging
+from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import App, User
+from app.models import App, Project, ProjectMember, ProjectRole, User
 
 logger = logging.getLogger(__name__)
+
+ROLE_LEVEL = {ProjectRole.read: 0, ProjectRole.normal: 1, ProjectRole.admin: 2}
 
 
 class AuthenticatedUser:
@@ -31,8 +36,8 @@ class AuthenticatedUser:
 
 
 def get_authenticated_user(request: Request, db: Session = Depends(get_db)) -> AuthenticatedUser:
-    """FastAPI dependency that reads user info from nginx-injected headers.
-    Auto-provisions the OpenMemory User row on first access."""
+    """FastAPI dependency: reads user from nginx-injected headers.
+    Auto-provisions OpenMemory User on first access."""
     auth_user_id = request.headers.get("X-Auth-User-Id")
     auth_username = request.headers.get("X-Auth-Username", "")
     auth_is_superadmin = request.headers.get("X-Auth-Is-Superadmin", "false") == "true"
@@ -62,3 +67,50 @@ def get_authenticated_user(request: Request, db: Session = Depends(get_db)) -> A
         is_superadmin=auth_is_superadmin,
         db_user=db_user,
     )
+
+
+class ProjectContext:
+    """Resolved project with the user's role."""
+
+    def __init__(self, project: Project, role: ProjectRole):
+        self.project = project
+        self.role = role
+
+    @property
+    def project_id(self):
+        return self.project.id
+
+    @property
+    def slug(self):
+        return self.project.slug
+
+
+def resolve_project(
+    auth: AuthenticatedUser,
+    db: Session,
+    project_slug: Optional[str],
+    min_role: ProjectRole = ProjectRole.read,
+) -> Optional[ProjectContext]:
+    """Resolve project from slug and verify the user has at least min_role.
+    Returns None if project_slug is None (backward compat for no-project queries)."""
+    if not project_slug:
+        return None
+
+    project = db.query(Project).filter(Project.slug == project_slug).first()
+    if not project:
+        raise HTTPException(404, f"Project '{project_slug}' not found")
+
+    if auth.is_superadmin:
+        return ProjectContext(project, ProjectRole.admin)
+
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == auth.db_user.id,
+    ).first()
+    if not member:
+        raise HTTPException(403, "Not a member of this project")
+
+    if ROLE_LEVEL.get(member.role, 0) < ROLE_LEVEL.get(min_role, 0):
+        raise HTTPException(403, f"Requires at least '{min_role.value}' role on project")
+
+    return ProjectContext(project, member.role)

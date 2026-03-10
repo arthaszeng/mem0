@@ -5,7 +5,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
 import { setAccessLogs, setMemoriesSuccess, setSelectedMemory, setRelatedMemories } from '@/store/memoriesSlice';
 
-// Define the new simplified memory type
 export interface SimpleMemory {
   id: string;
   text: string;
@@ -15,7 +14,6 @@ export interface SimpleMemory {
   app_name: string;
 }
 
-// Define the shape of the API response item
 interface ApiMemoryItem {
   id: string;
   content: string;
@@ -27,7 +25,6 @@ interface ApiMemoryItem {
   app_name: string;
 }
 
-// Define the shape of the API response
 interface ApiResponse {
   items: ApiMemoryItem[];
   total: number;
@@ -101,7 +98,6 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const [error, setError] = useState<string | null>(null);
   const [hasUpdates, setHasUpdates] = useState<number>(0);
   const dispatch = useDispatch<AppDispatch>();
-  const user_id = useSelector((state: RootState) => state.profile.userId);
   const memories = useSelector((state: RootState) => state.memories.memories);
   const selectedMemory = useSelector((state: RootState) => state.memories.selectedMemory);
 
@@ -124,9 +120,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       const response = await api.post<ApiResponse>(
         `/api/v1/memories/filter`,
         {
-          user_id: user_id,
-          page: page,
-          size: size,
+          page,
+          size,
           search_query: query,
           app_ids: filters?.apps,
           category_ids: filters?.categories,
@@ -161,17 +156,15 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       setIsLoading(false);
       throw new Error(errorMessage);
     }
-  }, [user_id, dispatch]);
+  }, [dispatch]);
 
   const createMemory = async (text: string): Promise<void> => {
     try {
-      const memoryData = {
-        user_id: user_id,
-        text: text,
+      await api.post<ApiMemoryItem>(`/api/v1/memories/`, {
+        text,
         infer: false,
         app: "openmemory",
-      }
-      await api.post<ApiMemoryItem>(`/api/v1/memories/`, memoryData);
+      });
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to create memory';
       setError(errorMessage);
@@ -183,7 +176,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const deleteMemories = async (memory_ids: string[]) => {
     try {
       await api.delete(`/api/v1/memories/`, {
-        data: { memory_ids, user_id }
+        data: { memory_ids }
       });
       dispatch(setMemoriesSuccess(memories.filter((memory: Memory) => !memory_ids.includes(memory.id))));
     } catch (err: any) {
@@ -195,15 +188,11 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   };
 
   const fetchMemoryById = async (memoryId: string): Promise<void> => {
-    if (memoryId === "") {
-      return;
-    }
+    if (memoryId === "") return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.get<SimpleMemory>(
-        `/api/v1/memories/${memoryId}?user_id=${user_id}`
-      );
+      const response = await api.get<SimpleMemory>(`/api/v1/memories/${memoryId}`);
       setIsLoading(false);
       dispatch(setSelectedMemory(response.data));
     } catch (err: any) {
@@ -215,9 +204,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   };
 
   const fetchAccessLogs = async (memoryId: string, page: number = 1, pageSize: number = 10): Promise<void> => {
-    if (memoryId === "") {
-      return;
-    }
+    if (memoryId === "") return;
     setIsLoading(true);
     setError(null);
     try {
@@ -235,14 +222,12 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   };
 
   const fetchRelatedMemories = async (memoryId: string): Promise<void> => {
-    if (memoryId === "") {
-      return;
-    }
+    if (memoryId === "") return;
     setIsLoading(true);
     setError(null);
     try {
       const response = await api.get<RelatedMemoriesResponse>(
-        `/api/v1/memories/${memoryId}/related?user_id=${user_id}`
+        `/api/v1/memories/${memoryId}/related`
       );
 
       const adaptedMemories: Memory[] = response.data.items.map((item: RelatedMemoryItem) => ({
@@ -268,16 +253,13 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   };
 
   const updateMemory = async (memoryId: string, content: string): Promise<void> => {
-    if (memoryId === "") {
-      return;
-    }
+    if (memoryId === "") return;
     setIsLoading(true);
     setError(null);
     try {
       await api.put(`/api/v1/memories/${memoryId}`, {
         memory_id: memoryId,
         memory_content: content,
-        user_id: user_id
       });
       setIsLoading(false);
       setHasUpdates(hasUpdates + 1);
@@ -290,17 +272,14 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   };
 
   const updateMemoryState = async (memoryIds: string[], state: string): Promise<void> => {
-    if (memoryIds.length === 0) {
-      return;
-    }
+    if (memoryIds.length === 0) return;
     setIsLoading(true);
     setError(null);
     try {
       await api.post(`/api/v1/memories/actions/pause`, {
         memory_ids: memoryIds,
         all_for_app: true,
-        state: state,
-        user_id: user_id
+        state,
       });
       dispatch(setMemoriesSuccess(memories.map((memory: Memory) => {
         if (memoryIds.includes(memory.id)) {
@@ -309,12 +288,10 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         return memory;
       })));
 
-      // If archive, delete the memory
       if (state === "archived") {
         dispatch(setMemoriesSuccess(memories.filter((memory: Memory) => !memoryIds.includes(memory.id))));
       }
 
-      // if selected memory, update it
       if (selectedMemory?.id && memoryIds.includes(selectedMemory.id)) {
         dispatch(setSelectedMemory({ ...selectedMemory, state: state as "active" | "paused" | "archived" | "deleted" }));
       }

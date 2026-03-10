@@ -1,29 +1,34 @@
+from typing import Optional
+
 from app.database import get_db
-from app.models import App, Memory, MemoryState, User
-from fastapi import APIRouter, Depends, HTTPException
+from app.models import App, Memory, MemoryState
+from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user, resolve_project
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
+
 @router.get("")
 async def get_profile(
-    user_id: str,
-    db: Session = Depends(get_db)
+    user_id: Optional[str] = None,
+    project_slug: Optional[str] = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Get total number of memories
-    total_memories = db.query(Memory).filter(Memory.user_id == user.id, Memory.state != MemoryState.deleted).count()
+    pctx = resolve_project(auth, db, project_slug)
+    user = auth.db_user
 
-    # Get total number of apps
-    apps = db.query(App).filter(App.owner == user)
+    mem_q = db.query(Memory).filter(Memory.user_id == user.id, Memory.state != MemoryState.deleted)
+    if pctx:
+        mem_q = mem_q.filter(Memory.project_id == pctx.project_id)
+    total_memories = mem_q.count()
+
+    apps = db.query(App).filter(App.owner_id == user.id)
     total_apps = apps.count()
 
     return {
         "total_memories": total_memories,
         "total_apps": total_apps,
-        "apps": apps.all()
+        "apps": apps.all(),
     }
-

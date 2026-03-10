@@ -13,9 +13,11 @@ from app.models import (
     MemoryAccessLog,
     MemoryState,
     MemoryStatusHistory,
+    ProjectRole,
     User,
 )
 from app.schemas import MemoryResponse
+from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user, resolve_project
 from app.utils.memory import get_memory_client
 from app.utils.permissions import check_memory_access_permissions
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -103,24 +105,29 @@ def get_accessible_memory_ids(db: Session, app_id: UUID) -> Set[UUID]:
 
 class SearchMemoryRequest(BaseModel):
     query: str
-    user_id: str
+    user_id: Optional[str] = None
     limit: int = 100
     threshold: float = 0.0
+    project_slug: Optional[str] = None
 
 
 @router.post("/search")
 async def search_memories_semantic(
     request: SearchMemoryRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
     """Semantic vector search over memories using the configured embedder + Qdrant."""
+    pctx = resolve_project(auth, db, request.project_slug)
+
     memory_client = get_memory_client()
     if not memory_client:
         raise HTTPException(status_code=503, detail="Memory client unavailable")
 
-    query_filter = Filter(
-        must=[FieldCondition(key="user_id", match=MatchValue(value=request.user_id))]
-    )
+    qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=auth.username))]
+    if pctx:
+        qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=str(pctx.project_id))))
+    query_filter = Filter(must=qdrant_filters)
 
     def _do_search():
         emb = memory_client.embedding_model.embed(request.query, "search")
@@ -152,35 +159,32 @@ async def search_memories_semantic(
             },
         })
 
+    user = auth.db_user
     matched_domain = match_domain_by_keywords(request.query)
     if matched_domain:
-        user = db.query(User).filter(User.user_id == request.user_id).first()
-        if user:
-            seen_ids = {r["id"] for r in results}
-            domain_memories = (
-                db.query(Memory)
-                .filter(
-                    Memory.user_id == user.id,
-                    Memory.state == MemoryState.active,
-                    Memory.metadata_.op("->>")("domain") == matched_domain,
-                )
-                .limit(request.limit)
-                .all()
-            )
-            for dm in domain_memories:
-                mid = str(dm.id)
-                if mid in seen_ids:
-                    continue
-                seen_ids.add(mid)
-                results.append({
-                    "id": mid,
-                    "memory": dm.content,
-                    "hash": None,
-                    "score": 0.5,
-                    "created_at": dm.created_at.isoformat() if dm.created_at else None,
-                    "updated_at": dm.updated_at.isoformat() if dm.updated_at else None,
-                    "metadata": dm.metadata_ or {},
-                })
+        seen_ids = {r["id"] for r in results}
+        domain_q = db.query(Memory).filter(
+            Memory.user_id == user.id,
+            Memory.state == MemoryState.active,
+            Memory.metadata_.op("->>")("domain") == matched_domain,
+        )
+        if pctx:
+            domain_q = domain_q.filter(Memory.project_id == pctx.project_id)
+        domain_memories = domain_q.limit(request.limit).all()
+        for dm in domain_memories:
+            mid = str(dm.id)
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+            results.append({
+                "id": mid,
+                "memory": dm.content,
+                "hash": None,
+                "score": 0.5,
+                "created_at": dm.created_at.isoformat() if dm.created_at else None,
+                "updated_at": dm.updated_at.isoformat() if dm.updated_at else None,
+                "metadata": dm.metadata_ or {},
+            })
 
     return {"results": results}
 
@@ -188,8 +192,9 @@ async def search_memories_semantic(
 # List all memories with filtering
 @router.get("/", response_model=Page[MemoryResponse])
 async def list_memories(
-    user_id: str,
+    user_id: Optional[str] = None,
     app_id: Optional[UUID] = None,
+    project_slug: Optional[str] = None,
     from_date: Optional[int] = Query(
         None,
         description="Filter memories created after this date (timestamp)",
@@ -205,17 +210,19 @@ async def list_memories(
     search_query: Optional[str] = None,
     sort_column: Optional[str] = Query(None, description="Column to sort by (memory, categories, app_name, created_at)"),
     sort_direction: Optional[str] = Query(None, description="Sort direction (asc or desc)"),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    pctx = resolve_project(auth, db, project_slug)
+    user = auth.db_user
 
     base_filters = [
         Memory.user_id == user.id,
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
     ]
+    if pctx:
+        base_filters.append(Memory.project_id == pctx.project_id)
 
     if search_query:
         matched_domain = match_domain_by_keywords(search_query)
@@ -285,19 +292,19 @@ async def list_memories(
 # Get all categories
 @router.get("/categories")
 async def get_categories(
-    user_id: str,
-    db: Session = Depends(get_db)
+    user_id: Optional[str] = None,
+    project_slug: Optional[str] = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    pctx = resolve_project(auth, db, project_slug)
+    user = auth.db_user
 
-    # Get unique categories associated with the user's memories
-    # Get all memories
-    memories = db.query(Memory).filter(Memory.user_id == user.id, Memory.state != MemoryState.deleted, Memory.state != MemoryState.archived).all()
-    # Get all categories from memories
+    q = db.query(Memory).filter(Memory.user_id == user.id, Memory.state != MemoryState.deleted, Memory.state != MemoryState.archived)
+    if pctx:
+        q = q.filter(Memory.project_id == pctx.project_id)
+    memories = q.all()
     categories = [category for memory in memories for category in memory.categories]
-    # Get unique categories
     unique_categories = list(set(categories))
 
     return {
@@ -308,40 +315,40 @@ async def get_categories(
 
 @router.get("/domains")
 async def get_domains(
-    user_id: str,
-    db: Session = Depends(get_db)
+    user_id: Optional[str] = None,
+    project_slug: Optional[str] = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    pctx = resolve_project(auth, db, project_slug)
+    user = auth.db_user
 
-    results = (
-        db.query(func.json_extract(Memory.metadata_, "$.domain"))
-        .filter(
-            Memory.user_id == user.id,
-            Memory.state != MemoryState.deleted,
-            Memory.state != MemoryState.archived,
-            Memory.metadata_.isnot(None),
-        )
-        .distinct()
-        .all()
+    domain_q = db.query(func.json_extract(Memory.metadata_, "$.domain")).filter(
+        Memory.user_id == user.id,
+        Memory.state != MemoryState.deleted,
+        Memory.state != MemoryState.archived,
+        Memory.metadata_.isnot(None),
     )
+    if pctx:
+        domain_q = domain_q.filter(Memory.project_id == pctx.project_id)
+    results = domain_q.distinct().all()
     domains = sorted([r[0] for r in results if r[0]])
     return {"domains": domains, "total": len(domains)}
 
 
 class CreateMemoryRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     text: str
     metadata: dict = {}
     infer: bool = True
     app: str = "openmemory"
+    project_slug: Optional[str] = None
 
 
 class RegisterMemoryRequest(BaseModel):
     memory_id: str
     content: str
-    user_id: str
+    user_id: Optional[str] = None
     app: str = "openclaw"
     metadata: dict = {}
 
@@ -354,19 +361,15 @@ class RegisterBatchRequest(BaseModel):
 async def register_external_memory(
     request: RegisterMemoryRequest,
     background_tasks: BackgroundTasks,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Register a memory that already exists in Qdrant into PostgreSQL.
+    """Register a memory that already exists in Qdrant into SQLite.
     Used by external clients (e.g. OpenClaw JS SDK) that write to Qdrant
     directly but need the memory visible in the OpenMemory UI."""
     from app.models import categorize_memory_background
 
-    user = db.query(User).filter(User.user_id == request.user_id).first()
-    if not user:
-        user = User(user_id=request.user_id)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    user = auth.db_user
 
     app_obj = db.query(App).filter(App.name == request.app, App.owner_id == user.id).first()
     if not app_obj:
@@ -402,19 +405,15 @@ async def register_external_memory(
 async def register_external_memories_batch(
     request: RegisterBatchRequest,
     background_tasks: BackgroundTasks,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Batch register multiple Qdrant-only memories into PostgreSQL."""
+    """Batch register multiple Qdrant-only memories into SQLite."""
     from app.models import categorize_memory_background
 
+    user = auth.db_user
     results = []
     for item in request.memories:
-        user = db.query(User).filter(User.user_id == item.user_id).first()
-        if not user:
-            user = User(user_id=item.user_id)
-            db.add(user)
-            db.flush()
-
         app_obj = db.query(App).filter(App.name == item.app, App.owner_id == user.id).first()
         if not app_obj:
             app_obj = App(name=item.app, owner_id=user.id)
@@ -446,16 +445,15 @@ async def register_external_memories_batch(
 
 @router.post("/backfill-categories")
 async def backfill_categories(
-    user_id: str,
-    background_tasks: BackgroundTasks,
+    user_id: Optional[str] = None,
+    background_tasks: BackgroundTasks = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
     """Trigger categorization for all memories that have no categories yet."""
     from app.models import categorize_memory_background
 
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = auth.db_user
 
     uncategorized = (
         db.query(Memory)
@@ -479,12 +477,12 @@ async def backfill_categories(
 async def create_memory(
     request: CreateMemoryRequest,
     background_tasks: BackgroundTasks,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == request.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    # Get or create app
+    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.normal)
+    user = auth.db_user
+
     app_obj = db.query(App).filter(App.name == request.app,
                                    App.owner_id == user.id).first()
     if not app_obj:
@@ -513,14 +511,18 @@ async def create_memory(
             "error": str(client_error)
         }
 
+    qdrant_meta = {
+        "source_app": "openmemory",
+        "mcp_client": request.app,
+    }
+    if pctx:
+        qdrant_meta["project_id"] = str(pctx.project_id)
+
     try:
         qdrant_response = memory_client.add(
             safe_text,
-            user_id=request.user_id,  # Use string user_id to match search
-            metadata={
-                "source_app": "openmemory",
-                "mcp_client": request.app,
-            },
+            user_id=auth.username,
+            metadata=qdrant_meta,
             infer=request.infer
         )
         
@@ -539,12 +541,15 @@ async def create_memory(
                     if existing_memory:
                         existing_memory.state = MemoryState.active
                         existing_memory.content = result['memory']
+                        if pctx and not existing_memory.project_id:
+                            existing_memory.project_id = pctx.project_id
                         memory = existing_memory
                     else:
                         memory = Memory(
                             id=memory_id,
                             user_id=user.id,
                             app_id=app_obj.id,
+                            project_id=pctx.project_id if pctx else None,
                             content=result['memory'],
                             metadata_=request.metadata,
                             state=MemoryState.active
@@ -587,9 +592,12 @@ async def create_memory(
 @router.get("/{memory_id}")
 async def get_memory(
     memory_id: UUID,
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
     memory = get_memory_or_404(db, memory_id)
+    if memory.user_id != auth.db_user.id and not auth.is_superadmin:
+        raise HTTPException(403, "Access denied")
     return {
         "id": memory.id,
         "text": memory.content,
@@ -604,17 +612,18 @@ async def get_memory(
 
 class DeleteMemoriesRequest(BaseModel):
     memory_ids: List[UUID]
-    user_id: str
+    user_id: Optional[str] = None
+    project_slug: Optional[str] = None
 
 # Delete multiple memories
 @router.delete("/")
 async def delete_memories(
     request: DeleteMemoriesRequest,
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == request.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.normal)
+    user = auth.db_user
 
     # Get memory client to delete from vector store
     try:
@@ -664,15 +673,15 @@ class PauseMemoriesRequest(BaseModel):
     all_for_app: bool = False
     global_pause: bool = False
     state: Optional[MemoryState] = None
-    user_id: str
+    user_id: Optional[str] = None
 
 # Pause access to memories
 @router.post("/actions/pause")
 async def pause_memories(
     request: PauseMemoriesRequest,
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    
     global_pause = request.global_pause
     all_for_app = request.all_for_app
     app_id = request.app_id
@@ -680,10 +689,7 @@ async def pause_memories(
     category_ids = request.category_ids
     state = request.state or MemoryState.paused
 
-    user = db.query(User).filter(User.user_id == request.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
+    user = auth.db_user
     user_id = user.id
     
     if global_pause:
@@ -745,7 +751,8 @@ async def get_memory_access_log(
     memory_id: UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
     query = db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id == memory_id)
     total = query.count()
@@ -766,26 +773,26 @@ async def get_memory_access_log(
 
 class UpdateMemoryRequest(BaseModel):
     memory_content: str
-    user_id: str
+    user_id: Optional[str] = None
 
 # Update a memory
 @router.put("/{memory_id}")
 async def update_memory(
     memory_id: UUID,
     request: UpdateMemoryRequest,
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == request.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
     memory = get_memory_or_404(db, memory_id)
+    if memory.user_id != auth.db_user.id and not auth.is_superadmin:
+        raise HTTPException(403, "Cannot update another user's memory")
     memory.content = request.memory_content
     db.commit()
     db.refresh(memory)
     return memory
 
 class FilterMemoriesRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     page: int = 1
     size: int = 10
     search_query: Optional[str] = None
@@ -797,21 +804,25 @@ class FilterMemoriesRequest(BaseModel):
     from_date: Optional[int] = None
     to_date: Optional[int] = None
     show_archived: Optional[bool] = False
+    project_slug: Optional[str] = None
 
 @router.post("/filter", response_model=Page[MemoryResponse])
 async def filter_memories(
     request: FilterMemoriesRequest,
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.user_id == request.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    pctx = resolve_project(auth, db, request.project_slug)
+    user = auth.db_user
 
-    # Build base query
-    query = db.query(Memory).filter(
+    base_project_filters = [
         Memory.user_id == user.id,
         Memory.state != MemoryState.deleted,
-    )
+    ]
+    if pctx:
+        base_project_filters.append(Memory.project_id == pctx.project_id)
+
+    query = db.query(Memory).filter(*base_project_filters)
 
     # Filter archived memories based on show_archived parameter
     if not request.show_archived:
@@ -907,14 +918,12 @@ async def filter_memories(
 @router.get("/{memory_id}/related", response_model=Page[MemoryResponse])
 async def get_related_memories(
     memory_id: UUID,
-    user_id: str,
+    user_id: Optional[str] = None,
     params: Params = Depends(),
-    db: Session = Depends(get_db)
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    # Validate user
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = auth.db_user
     
     # Get the source memory
     memory = get_memory_or_404(db, memory_id)

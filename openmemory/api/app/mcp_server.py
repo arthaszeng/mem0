@@ -604,62 +604,69 @@ async def run_agent_task(prompt: str) -> str:
         return f"Agent error: {e}"
 
 
-@mcp_router.get("/{client_name}/sse/{user_id}")
-async def handle_sse(request: Request):
-    """Handle SSE connections for a specific user and client"""
-    # Extract user_id and client_name from path parameters
+def _read_gateway_user(request: Request) -> str:
+    """Read username from nginx gateway headers; fall back to path param for backward compat."""
+    username = request.headers.get("X-Auth-Username")
+    if username:
+        return username
     uid = request.path_params.get("user_id")
-    user_token = user_id_var.set(uid or "")
-    client_name = request.path_params.get("client_name")
-    client_token = client_name_var.set(client_name or "")
+    if uid:
+        return uid
+    return ""
 
+
+@mcp_router.get("/{client_name}/sse")
+async def handle_sse_new(request: Request):
+    """SSE endpoint – user identity from gateway headers."""
+    uid = _read_gateway_user(request)
+    user_token = user_id_var.set(uid)
+    client_name = request.path_params.get("client_name", "")
+    client_token = client_name_var.set(client_name)
     try:
-        # Handle SSE connection
-        async with sse.connect_sse(
-            request.scope,
-            request.receive,
-            request._send,
-        ) as (read_stream, write_stream):
-            await mcp._mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp._mcp_server.create_initialization_options(),
-            )
+        async with sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
+            await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
     finally:
-        # Clean up context variables
+        user_id_var.reset(user_token)
+        client_name_var.reset(client_token)
+
+
+@mcp_router.get("/{client_name}/sse/{user_id}")
+async def handle_sse_compat(request: Request):
+    """Backward-compatible SSE endpoint with user_id in path."""
+    uid = _read_gateway_user(request)
+    user_token = user_id_var.set(uid)
+    client_name = request.path_params.get("client_name", "")
+    client_token = client_name_var.set(client_name)
+    try:
+        async with sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
+            await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
+    finally:
         user_id_var.reset(user_token)
         client_name_var.reset(client_token)
 
 
 @mcp_router.post("/messages/")
-async def handle_get_message(request: Request):
-    return await handle_post_message(request)
+async def handle_messages_root(request: Request):
+    return await _handle_post_message(request)
 
 
 @mcp_router.post("/{client_name}/sse/{user_id}/messages/")
-async def handle_post_message(request: Request):
-    return await handle_post_message(request)
+async def handle_messages_compat(request: Request):
+    return await _handle_post_message(request)
 
-async def handle_post_message(request: Request):
-    """Handle POST messages for SSE"""
-    try:
-        body = await request.body()
 
-        # Create a simple receive function that returns the body
-        async def receive():
-            return {"type": "http.request", "body": body, "more_body": False}
+async def _handle_post_message(request: Request):
+    """Handle POST messages for SSE."""
+    body = await request.body()
 
-        # Create a simple send function that does nothing
-        async def send(message):
-            return {}
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
 
-        # Call handle_post_message with the correct arguments
-        await sse.handle_post_message(request.scope, receive, send)
+    async def send(message):
+        return {}
 
-        # Return a success response
-        return {"status": "ok"}
-    finally:
-        pass
+    await sse.handle_post_message(request.scope, receive, send)
+    return {"status": "ok"}
 
 def setup_mcp_server(app: FastAPI):
     """Setup MCP server with the FastAPI application"""
