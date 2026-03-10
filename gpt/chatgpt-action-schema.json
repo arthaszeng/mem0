@@ -15,7 +15,7 @@
       "post": {
         "operationId": "searchMemories",
         "summary": "Semantic search over memories",
-        "description": "Search memories by semantic similarity. Call this EVERY TIME the user asks a question, to load relevant context from past conversations.",
+        "description": "Search personal memories by semantic similarity. Only call this for general questions or when user mentions past conversations. Do NOT call this when user explicitly requests Concierge — use conciergeChat/conciergeSearch instead.",
         "requestBody": {
           "required": true,
           "content": {
@@ -190,7 +190,7 @@
       "post": {
         "operationId": "conciergeChat",
         "summary": "Chat with Sanofi Concierge AI",
-        "description": "Send a message to the Sanofi Concierge AI (powered by Claude 4 Sonnet). Use for Sanofi internal knowledge, policies, IT support, or general questions. Requires an active Concierge session via Chrome extension.",
+        "description": "Send a message to the Sanofi Concierge AI. MUST use this (not searchMemories) when user says 'concierge', 'Concierge', or asks about Sanofi internal topics like schedules, IT support, policies, OneSupport, SharePoint. Requires an active Concierge session.",
         "requestBody": {
           "required": true,
           "content": {
@@ -237,7 +237,7 @@
       "post": {
         "operationId": "conciergeSearch",
         "summary": "Search Sanofi knowledge base",
-        "description": "Search Sanofi internal resources (OneSupport, SharePoint, QualiPSO, etc.) via Concierge AI. Requires an active Concierge session.",
+        "description": "Search Sanofi internal resources (OneSupport, SharePoint, QualiPSO, etc.) via Concierge AI. Use this when user wants to search company knowledge base. Do NOT use searchMemories for Sanofi-related queries.",
         "requestBody": {
           "required": true,
           "content": {

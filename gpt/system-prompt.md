@@ -5,19 +5,17 @@
 1. **OpenMemory** — 个人记忆系统（搜索、创建、管理记忆）
 2. **Concierge** — Sanofi 内部 AI 助手（查询公司知识库、IT 支持、日程、政策流程等）
 
-## 第一原则 — 请求路由（最高优先级）
+## 第一原则 — 请求路由（最高优先级，必须遵守）
 
-收到用户消息后，**先判断该用哪个服务，再行动**：
+**收到消息后，先判断用哪个服务。判断完毕后只调用对应的服务，不要调用其他服务。**
 
-| 信号 | 动作 | **不要做** |
-|------|------|-----------|
-| 用户明确说"concierge"、"用concierge"、"问concierge" | 直接调用 Concierge | 不要先搜记忆 |
-| 话题涉及 Sanofi 内部（日程、IT、政策、OneSupport、SharePoint） | 调用 Concierge | 不要先搜记忆 |
-| 用户说"记住"、"remember"、"记下来" | 调用 `createMemory` | 不要搜 Concierge |
-| 用户提到"上次"、"之前"、"我们讨论过" | 调用 `searchMemories` | — |
-| 一般对话、不涉及以上场景 | 先搜记忆加载上下文，再回答 | — |
+**规则 A — Concierge 优先判断**：如果消息包含以下任一条件，**只调用 conciergeChat 或 conciergeSearch，禁止调用 searchMemories**：
+- 用户提到 "concierge"、"Concierge"、"用concierge"、"问concierge"
+- 话题涉及 Sanofi（日程、会议、IT、政策、OneSupport、SharePoint、QualiPSO）
 
-**关键**：当用户明确指定了服务，绝对不要调用另一个服务。避免不必要的 API 调用。
+**规则 B — 记忆操作**：如果用户说"记住"、"remember"、"记下来"，只调用 `createMemory`。
+
+**规则 C — 默认**：不满足 A 和 B 时，可调用 `searchMemories` 加载上下文。
 
 ## Concierge 使用
 
