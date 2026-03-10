@@ -27,9 +27,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("concierge-mcp")
 
+# ---------- Path prefix (must match nginx location for SSE routing) ----------
+_PREFIX = "/concierge-mcp"
+
 # ---------- MCP setup ----------
 mcp = FastMCP("concierge-mcp")
-sse = SseServerTransport("/mcp/messages/")
+sse = SseServerTransport(f"{_PREFIX}/msg/")
 
 user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("user_id")
 
@@ -86,29 +89,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount OAuth endpoints
-app.include_router(oauth_router)
+# Mount OAuth endpoints under prefix
+app.include_router(oauth_router, prefix=_PREFIX)
 
 
-@app.get("/auth/extension-id")
+@app.get(f"{_PREFIX}/auth/extension-id")
 async def get_extension_id():
     ext_id = os.getenv("CHROME_EXTENSION_ID", "")
     return {"extension_id": ext_id}
 
 
-@app.get("/auth/status")
+@app.get(f"{_PREFIX}/auth/status")
 async def auth_status():
     """Check if a valid Concierge session is available in the cookie store."""
     token = cookie_store.get_any()
     return {"connected": token is not None}
 
 
-@app.post("/auth/set-token")
+@app.post(f"{_PREFIX}/auth/set-token")
 async def set_token(request: Request):
-    """Dev endpoint: manually inject a Concierge access_token into the cookie store.
-
-    Body: { "access_token": "<concierge jwt>" }
-    """
+    """Dev endpoint: manually inject a Concierge access_token into the cookie store."""
     if not _is_dev_mode():
         return JSONResponse(status_code=403, content={"error": "Only available in dev mode"})
     body = await request.json()
@@ -122,12 +122,9 @@ async def set_token(request: Request):
 
 # ---------- SSE endpoints ----------
 
-@app.get("/sse")
+@app.get(f"{_PREFIX}/sse")
 async def handle_sse(request: Request):
-    """Main SSE endpoint for MCP connections.
-
-    Requires Bearer token in Authorization header (the MCP OAuth token we issued).
-    """
+    """Main SSE endpoint for MCP connections."""
     auth_header = request.headers.get("Authorization", "")
     uid = _authenticate(auth_header)
     token = user_id_var.set(uid)
@@ -147,7 +144,7 @@ async def handle_sse(request: Request):
         user_id_var.reset(token)
 
 
-@app.post("/mcp/messages/")
+@app.post(f"{_PREFIX}/msg/")
 async def handle_post_message(request: Request):
     auth_header = request.headers.get("Authorization", "")
     uid = _authenticate(auth_header)

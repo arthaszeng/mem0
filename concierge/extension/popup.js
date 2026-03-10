@@ -1,4 +1,4 @@
-const MCP_SERVER = "http://localhost:8766";
+const MCP_SERVER = "http://47.108.141.20/concierge-mcp";
 const CONCIERGE_URL = "https://concierge.sanofi.com/";
 
 const dotServer = document.getElementById("dotServer");

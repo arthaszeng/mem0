@@ -6,7 +6,8 @@
   "permissions": ["cookies"],
   "host_permissions": [
     "https://concierge.sanofi.com/*",
-    "http://localhost:8766/*"
+    "http://localhost:8766/*",
+    "http://47.108.141.20/*"
   ],
   "background": {
     "service_worker": "background.js"
