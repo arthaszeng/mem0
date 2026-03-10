@@ -84,10 +84,21 @@ async def _memory_write_worker():
 
             text = sanitize_text(text)
 
+            db = SessionLocal()
+            try:
+                user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+                project_id, _ = _get_user_default_project(db, user.id)
+            finally:
+                db.close()
+
+            qdrant_meta = {"source_app": "openmemory", "mcp_client": client_name}
+            if project_id:
+                qdrant_meta["project_id"] = project_id
+
             response = await asyncio.to_thread(
                 memory_client.add, text,
                 user_id=uid,
-                metadata={"source_app": "openmemory", "mcp_client": client_name},
+                metadata=qdrant_meta,
             )
 
             db = SessionLocal()
@@ -106,6 +117,7 @@ async def _memory_write_worker():
                                     id=memory_id,
                                     user_id=user.id,
                                     app_id=app.id,
+                                    project_id=project_id,
                                     content=result["memory"],
                                     state=MemoryState.active,
                                 )
@@ -113,6 +125,8 @@ async def _memory_write_worker():
                             else:
                                 memory.state = MemoryState.active
                                 memory.content = result["memory"]
+                                if project_id and not memory.project_id:
+                                    memory.project_id = project_id
 
                             db.add(MemoryStatusHistory(
                                 memory_id=memory_id,
@@ -126,11 +140,14 @@ async def _memory_write_worker():
                             if memory:
                                 memory.content = result["memory"]
                                 memory.updated_at = datetime.datetime.now(datetime.UTC)
+                                if project_id and not memory.project_id:
+                                    memory.project_id = project_id
                             else:
                                 memory = Memory(
                                     id=memory_id,
                                     user_id=user.id,
                                     app_id=app.id,
+                                    project_id=project_id,
                                     content=result["memory"],
                                     state=MemoryState.active,
                                 )
@@ -177,6 +194,18 @@ def get_memory_client_safe():
 # Context variables for user_id and client_name
 user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("user_id")
 client_name_var: contextvars.ContextVar[str] = contextvars.ContextVar("client_name")
+
+
+def _get_user_default_project(db, user_id: int) -> "tuple[str | None, str | None]":
+    """Return (project_id, project_slug) for the user's first project membership, or (None, None)."""
+    from app.models import ProjectMember, Project
+    member = db.query(ProjectMember).filter(ProjectMember.user_id == user_id).first()
+    if not member:
+        return None, None
+    project = db.query(Project).filter(Project.id == member.project_id).first()
+    if not project:
+        return None, None
+    return str(project.id), project.slug
 
 # Create a router for MCP endpoints
 mcp_router = APIRouter(prefix="/memory-mcp")
@@ -236,13 +265,15 @@ async def search_memory(query: str) -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _get_user_default_project(db, user.id)
 
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
-            query_filter = Filter(
-                must=[FieldCondition(key="user_id", match=MatchValue(value=uid))]
-            )
+            qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=uid))]
+            if project_id:
+                qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=project_id)))
+            query_filter = Filter(must=qdrant_filters)
 
             def _do_search():
                 emb = memory_client.embedding_model.embed(query, "search")
@@ -345,14 +376,16 @@ async def list_memories() -> str:
     try:
         db = SessionLocal()
         try:
-            # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _get_user_default_project(db, user.id)
 
             memories = await asyncio.to_thread(memory_client.get_all, user_id=uid)
             filtered_memories = []
 
-            # Filter memories based on permissions
-            user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
+            mem_q = db.query(Memory).filter(Memory.user_id == user.id)
+            if project_id:
+                mem_q = mem_q.filter(Memory.project_id == project_id)
+            user_memories = mem_q.all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
             if isinstance(memories, dict) and 'results' in memories:
                 for memory_data in memories['results']:

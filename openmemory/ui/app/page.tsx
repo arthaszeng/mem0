@@ -1,38 +1,38 @@
 "use client";
 
-import { Install } from "@/components/dashboard/Install";
-import Stats from "@/components/dashboard/Stats";
-import { MemoryFilters } from "@/app/memories/components/MemoryFilters";
-import { MemoriesSection } from "@/app/memories/components/MemoriesSection";
-import "@/styles/animation.css";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import api from "@/lib/api";
 
-export default function DashboardPage() {
-  return (
-    <div className="text-white py-6">
-      <div className="container">
-        <div className="w-full mx-auto space-y-6">
-          <div className="grid grid-cols-3 gap-6">
-            {/* Memory Category Breakdown */}
-            <div className="col-span-2 animate-fade-slide-down">
-              <Install />
-            </div>
+export default function RootPage() {
+  const router = useRouter();
+  const [error, setError] = useState("");
 
-            {/* Memories Stats */}
-            <div className="col-span-1 animate-fade-slide-down delay-1">
-              <Stats />
-            </div>
-          </div>
+  useEffect(() => {
+    api
+      .get("/api/v1/projects")
+      .then((res) => {
+        const projects = res.data;
+        if (projects.length > 0) {
+          router.replace(`/${projects[0].slug}`);
+        } else {
+          setError("No projects found. Create one first.");
+        }
+      })
+      .catch(() => setError("Failed to load projects"));
+  }, [router]);
 
-          <div>
-            <div className="animate-fade-slide-down delay-2">
-              <MemoryFilters />
-            </div>
-            <div className="animate-fade-slide-down delay-3">
-              <MemoriesSection />
-            </div>
-          </div>
-        </div>
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-[60vh] text-zinc-400">
+        <p>{error}</p>
       </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center h-[60vh]">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" />
     </div>
   );
 }

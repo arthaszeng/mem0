@@ -16,7 +16,7 @@ function isJwtExpired(token: string): boolean {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  if (pathname === "/login" || pathname.startsWith("/api/auth/")) {
+  if (pathname === "/login" || pathname === "/change-password" || pathname.startsWith("/api/auth/")) {
     return NextResponse.next();
   }
 

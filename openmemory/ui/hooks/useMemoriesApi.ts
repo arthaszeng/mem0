@@ -4,6 +4,7 @@ import { Memory, Client, Category } from '@/components/types';
 import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '@/store/store';
 import { setAccessLogs, setMemoriesSuccess, setSelectedMemory, setRelatedMemories } from '@/store/memoriesSlice';
+import { useProjectSlug } from './useProjectSlug';
 
 export interface SimpleMemory {
   id: string;
@@ -100,6 +101,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const dispatch = useDispatch<AppDispatch>();
   const memories = useSelector((state: RootState) => state.memories.memories);
   const selectedMemory = useSelector((state: RootState) => state.memories.selectedMemory);
+  const projectSlug = useProjectSlug();
 
   const fetchMemories = useCallback(async (
     query?: string,
@@ -128,7 +130,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
           domains: filters?.domains,
           sort_column: filters?.sortColumn?.toLowerCase(),
           sort_direction: filters?.sortDirection,
-          show_archived: filters?.showArchived
+          show_archived: filters?.showArchived,
+          project_slug: projectSlug || undefined,
         }
       );
 
@@ -156,7 +159,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       setIsLoading(false);
       throw new Error(errorMessage);
     }
-  }, [dispatch]);
+  }, [dispatch, projectSlug]);
 
   const createMemory = async (text: string): Promise<void> => {
     try {
@@ -164,6 +167,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         text,
         infer: false,
         app: "openmemory",
+        project_slug: projectSlug || undefined,
       });
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to create memory';
@@ -176,7 +180,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   const deleteMemories = async (memory_ids: string[]) => {
     try {
       await api.delete(`/api/v1/memories/`, {
-        data: { memory_ids }
+        data: { memory_ids, project_slug: projectSlug || undefined }
       });
       dispatch(setMemoriesSuccess(memories.filter((memory: Memory) => !memory_ids.includes(memory.id))));
     } catch (err: any) {

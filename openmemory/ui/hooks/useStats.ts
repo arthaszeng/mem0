@@ -2,10 +2,9 @@ import { useState } from 'react';
 import api from '@/lib/api';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '@/store/store';
-import { setApps, setTotalApps } from '@/store/profileSlice';
-import { setTotalMemories } from '@/store/profileSlice';
+import { setApps, setTotalApps, setTotalMemories } from '@/store/profileSlice';
+import { useProjectSlug } from './useProjectSlug';
 
-// Define the new simplified memory type
 export interface SimpleMemory {
   id: string;
   text: string;
@@ -15,13 +14,11 @@ export interface SimpleMemory {
   app_name: string;
 }
 
-// Define the shape of the API response item
 interface APIStatsResponse {
   total_memories: number;
   total_apps: number;
   apps: any[];
 }
-
 
 interface UseMemoriesApiReturn {
   fetchStats: () => Promise<void>;
@@ -33,11 +30,14 @@ export const useStats = (): UseMemoriesApiReturn => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const dispatch = useDispatch<AppDispatch>();
+  const projectSlug = useProjectSlug();
+
   const fetchStats = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.get<APIStatsResponse>(`/api/v1/stats`);
+      const params = projectSlug ? `?project_slug=${projectSlug}` : '';
+      const response = await api.get<APIStatsResponse>(`/api/v1/stats${params}`);
       dispatch(setTotalMemories(response.data.total_memories));
       dispatch(setTotalApps(response.data.total_apps));
       dispatch(setApps(response.data.apps));
