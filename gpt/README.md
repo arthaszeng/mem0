@@ -60,26 +60,37 @@
 1. 在 ChatGPT 中创建自定义 GPT
 2. 粘贴 `system-prompt.md` 的内容作为 Instructions
 3. 在 Actions → Import from URL / Paste Schema 中导入 `chatgpt-action-schema.json`
-4. 配置 Authentication:
+4. **将 Schema 中的 server URL 替换为实际的 Tunnel URL**（见下方获取方式）
+5. 配置 Authentication:
    - Authentication Type: **API Key**
-   - API Key: 填入 nginx 中配置的 `X-API-Key` 值（见 `nginx/nginx.conf` 中 `/api/` location 的 `proxy_set_header`）
+   - API Key: 服务器上 `docker exec openmemory-openmemory-mcp-1 env | grep API_KEY` 的值
    - Auth Type: **Custom**
    - Custom Header Name: `X-API-Key`
-5. 点击 "Test" 验证每个 Action 能否正常调用
+6. 点击 "Test" 验证每个 Action 能否正常调用
 
-> **注意**: nginx 的 `/api/` location 会自动注入 `X-API-Key` header，
-> 所以即使 ChatGPT 发送的 key 值与实际不同也不影响。但 ChatGPT 要求
-> Authentication 必须配置后才允许发起请求。
+**Cloudflare Tunnel（绕过 ICP）**:
 
-**服务器 URL 选择**:
-- Schema 默认使用 `https://arthaszeng.top`（需域名已完成 ICP 备案）
-- 如域名不通，可改为 `https://47.108.141.20`（需在 ChatGPT 中忽略证书警告，可能不支持）
-- 最稳定方案: 通过 Cloudflare Tunnel 暴露一个海外可达的 HTTPS 端点
+ChatGPT Actions 从海外服务器发起请求，域名未备案时阿里云网关返回 403，
+IP 直连又有 SSL 证书不匹配问题。Cloudflare Tunnel 从服务器主动向外建连，
+完全绕过 ICP 入站拦截。
 
-**已知限制**:
-- ChatGPT Actions 从美国/海外服务器发起请求，直连中国阿里云服务器可能被 ICP 拦截
-- 域名未备案时，阿里云网关返回 403（"Non-compliance ICP Filing"）
-- 可选方案: Cloudflare Tunnel（`cloudflared tunnel`）暴露本地 8765 端口到公网
+Tunnel 已作为 systemd 服务运行，开机自启：
+
+```bash
+# 查看当前 Tunnel URL（Quick Tunnel 每次重启 URL 会变）
+ssh -i ~/.ssh/arthas admin@47.108.141.20 \
+  "sudo journalctl -u cloudflared-tunnel --no-pager -n 20 | grep trycloudflare"
+
+# 管理服务
+sudo systemctl status cloudflared-tunnel   # 查看状态
+sudo systemctl restart cloudflared-tunnel  # 重启（URL 会变）
+sudo systemctl stop cloudflared-tunnel     # 停止
+```
+
+> **注意**: Quick Tunnel 的 URL 在每次服务重启时会变化。
+> 如需固定 URL，可升级为 Cloudflare Named Tunnel（需 Cloudflare 账号登录）。
+
+**流量路径**: ChatGPT → HTTPS → Cloudflare Edge → Tunnel → `127.0.0.1:8765` → 后端
 
 ### 3. Lobe Chat（内置）
 
