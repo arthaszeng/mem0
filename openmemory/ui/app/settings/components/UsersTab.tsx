@@ -56,6 +56,15 @@ export function UsersTab() {
     catch (err: any) { alert(err?.response?.data?.detail || "Failed"); }
   };
 
+  const handlePurge = async (userId: string, username: string) => {
+    if (!confirm(`PERMANENTLY DELETE user "${username}" and ALL their data (projects, memories, memberships)?\n\nThis CANNOT be undone.`)) return;
+    try {
+      await api.delete(`/api/v1/projects/admin/users/${username}/purge`);
+      await api.delete(`/auth/users/${userId}?permanent=true`);
+      fetchUsers();
+    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to purge user"); }
+  };
+
   const handleResetPassword = async (userId: string) => {
     const newPw = prompt("Enter new temporary password:");
     if (!newPw) return;
@@ -105,11 +114,12 @@ export function UsersTab() {
                   {!u.is_active && <span className="text-xs px-2 py-0.5 rounded bg-red-800/40 text-red-300 border border-red-700/50">inactive</span>}
                   {u.must_change_password && <span className="text-xs px-2 py-0.5 rounded bg-yellow-800/40 text-yellow-300 border border-yellow-700/50">must change pw</span>}
                 </div>
-                <p className="text-xs text-zinc-500 mt-1">{u.email || "no email"} &middot; created {new Date(u.created_at).toLocaleDateString()}</p>
+                <p className="text-xs text-zinc-500 mt-1">{`${u.email || "no email"} \u00B7 created ${new Date(u.created_at).toLocaleDateString()}`}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="icon" title="Reset password" className="text-zinc-400 hover:text-white" onClick={() => handleResetPassword(u.id)}><RotateCcw className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="icon" title="Deactivate" className="text-red-400 hover:text-red-300" onClick={() => handleDeactivate(u.id)}><Trash2 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" title="Deactivate" className="text-yellow-400 hover:text-yellow-300" onClick={() => handleDeactivate(u.id)}><Trash2 className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="sm" title="Permanently delete user and all data" className="text-red-500 hover:text-red-400 text-xs px-2" onClick={() => handlePurge(u.id, u.username)}>Purge</Button>
               </div>
             </div>
           ))}

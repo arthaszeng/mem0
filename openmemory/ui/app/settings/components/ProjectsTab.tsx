@@ -138,7 +138,7 @@ export function ProjectsTab() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-white">{p.name}</h3>
-                  <p className="text-sm text-zinc-400">slug: {p.slug} &middot; owner: {p.owner_username} &middot; {p.member_count} member(s)</p>
+                  <p className="text-sm text-zinc-400">{`slug: ${p.slug} \u00B7 owner: ${p.owner_username} \u00B7 ${p.member_count} member(s)`}</p>
                   {p.description && <p className="text-sm text-zinc-500 mt-1">{p.description}</p>}
                 </div>
                 <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-300 hover:bg-red-900/20" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ slug: p.slug, name: p.name }); }}>
@@ -147,29 +147,12 @@ export function ProjectsTab() {
               </div>
 
               {selectedProject === p.slug && (
-                <div className="mt-4 border-t border-zinc-700 pt-4">
+                <div className="mt-4 border-t border-zinc-700 pt-4" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-medium text-zinc-300 flex items-center gap-2"><Users className="h-4 w-4" /> Members</h4>
-                    <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
-                      <DialogTrigger asChild>
-                        <Button size="sm" variant="outline" className="gap-1 text-xs border-zinc-600"><Plus className="h-3 w-3" /> Add Member</Button>
-                      </DialogTrigger>
-                      <DialogContent className="bg-zinc-900 border-zinc-700">
-                        <DialogHeader><DialogTitle>Add Member</DialogTitle></DialogHeader>
-                        <div className="space-y-4 py-2">
-                          <div><Label>Username</Label><Input value={newMemberUsername} onChange={(e) => setNewMemberUsername(e.target.value)} className="bg-zinc-800 border-zinc-700" /></div>
-                          <div>
-                            <Label>Role</Label>
-                            <select value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value)} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white">
-                              <option value="read_only">Read Only</option>
-                              <option value="read_write">Read / Write</option>
-                              <option value="admin">Admin</option>
-                            </select>
-                          </div>
-                        </div>
-                        <DialogFooter><Button onClick={handleAddMember} disabled={!newMemberUsername.trim()}>Add</Button></DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                    <Button size="sm" variant="outline" className="gap-1 text-xs border-zinc-600" onClick={() => setAddMemberOpen(true)}>
+                      <Plus className="h-3 w-3" /> Add Member
+                    </Button>
                   </div>
                   {members.length === 0 ? <p className="text-xs text-zinc-500">No members.</p> : (
                     <div className="space-y-2">
@@ -192,6 +175,24 @@ export function ProjectsTab() {
           ))}
         </div>
       )}
+
+      <Dialog open={addMemberOpen} onOpenChange={(open) => { setAddMemberOpen(open); if (!open) { setNewMemberUsername(""); setNewMemberRole("read_write"); } }}>
+        <DialogContent className="bg-zinc-900 border-zinc-700 z-[100]">
+          <DialogHeader><DialogTitle>Add Member</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div><Label>Username</Label><Input value={newMemberUsername} onChange={(e) => setNewMemberUsername(e.target.value)} className="bg-zinc-800 border-zinc-700" /></div>
+            <div>
+              <Label>Role</Label>
+              <select value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value)} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white">
+                <option value="read_only">Read Only</option>
+                <option value="read_write">Read / Write</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={handleAddMember} disabled={!newMemberUsername.trim()}>Add</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteConfirmText(""); } }}>
         <DialogContent className="bg-zinc-900 border-zinc-700">

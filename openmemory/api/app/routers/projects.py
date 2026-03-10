@@ -1,6 +1,7 @@
-"""Project CRUD, member management, and invite system."""
+"""Project CRUD, member management, invite system, and admin user purge."""
 
 import datetime
+import logging
 import re
 import secrets
 from typing import List, Optional
@@ -12,11 +13,16 @@ def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
 from app.database import get_db
-from app.models import InviteStatus, Project, ProjectInvite, ProjectMember, ProjectRole, User
+from app.models import (
+    App, InviteStatus, Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory,
+    Project, ProjectInvite, ProjectMember, ProjectRole, User, memory_categories,
+)
 from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
@@ -167,12 +173,19 @@ def delete_project(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    from app.models import Memory, MemoryState, memory_categories
-    from app.utils.memory import get_memory_client
-    import logging
-
     project = _get_project_or_404(db, slug)
     _require_project_access(db, project, auth, ProjectRole.admin)
+
+    deleted_count = _cascade_delete_project(db, project)
+    return {
+        "message": f"Project '{slug}' deleted",
+        "deleted_memories": deleted_count,
+    }
+
+
+def _cascade_delete_project(db: Session, project: Project) -> int:
+    """Delete a project and all associated data. Returns deleted memory count."""
+    from app.utils.memory import get_memory_client
 
     memories = db.query(Memory).filter(Memory.project_id == project.id).all()
     memory_ids = [m.id for m in memories]
@@ -185,14 +198,13 @@ def delete_project(
                     try:
                         memory_client.delete(str(mid))
                     except Exception as e:
-                        logging.warning("Failed to delete memory %s from Qdrant: %s", mid, e)
+                        logger.warning("Failed to delete memory %s from Qdrant: %s", mid, e)
         except Exception as e:
-            logging.warning("Could not initialize memory client for cascade delete: %s", e)
+            logger.warning("Could not initialize memory client for cascade delete: %s", e)
 
         db.execute(memory_categories.delete().where(memory_categories.c.memory_id.in_(memory_ids)))
-        for mem in memories:
-            mem.state = MemoryState.deleted
-            mem.deleted_at = _utcnow()
+        db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id.in_(memory_ids)).delete(synchronize_session=False)
+        db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(memory_ids)).delete(synchronize_session=False)
 
     db.query(ProjectInvite).filter(ProjectInvite.project_id == project.id).delete()
     db.query(ProjectMember).filter(ProjectMember.project_id == project.id).delete()
@@ -202,10 +214,7 @@ def delete_project(
 
     db.delete(project)
     db.commit()
-    return {
-        "message": f"Project '{slug}' deleted",
-        "deleted_memories": len(memory_ids),
-    }
+    return len(memory_ids)
 
 
 @router.get("/{slug}/members")
@@ -473,3 +482,72 @@ def _project_dict(project: Project, role: Optional[ProjectRole]) -> dict:
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Admin: Purge user and all associated data
+# ---------------------------------------------------------------------------
+
+@router.delete("/admin/users/{username}/purge")
+def purge_user(
+    username: str,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Permanently delete a user and all associated data (superadmin only).
+
+    Cascade: owned projects (+ their memories/invites/members), memberships,
+    orphan memories, apps, access logs, status history, and the user record.
+    """
+    if not auth.is_superadmin:
+        raise HTTPException(403, "Superadmin required")
+
+    target = db.query(User).filter(User.user_id == username).first()
+    if not target:
+        raise HTTPException(404, f"User '{username}' not found in OpenMemory")
+
+    if target.id == auth.db_user.id:
+        raise HTTPException(400, "Cannot purge yourself")
+
+    stats = {"projects_deleted": 0, "memories_deleted": 0, "memberships_removed": 0}
+
+    owned_projects = db.query(Project).filter(Project.owner_id == target.id).all()
+    for proj in owned_projects:
+        count = _cascade_delete_project(db, proj)
+        stats["projects_deleted"] += 1
+        stats["memories_deleted"] += count
+
+    remaining_memberships = db.query(ProjectMember).filter(ProjectMember.user_id == target.id).all()
+    for m in remaining_memberships:
+        db.delete(m)
+        stats["memberships_removed"] += 1
+
+    orphan_memories = db.query(Memory).filter(Memory.user_id == target.id).all()
+    orphan_ids = [m.id for m in orphan_memories]
+    if orphan_ids:
+        from app.utils.memory import get_memory_client
+        try:
+            mc = get_memory_client()
+            if mc:
+                for mid in orphan_ids:
+                    try:
+                        mc.delete(str(mid))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        db.execute(memory_categories.delete().where(memory_categories.c.memory_id.in_(orphan_ids)))
+        db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id.in_(orphan_ids)).delete(synchronize_session=False)
+        db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(orphan_ids)).delete(synchronize_session=False)
+        for mem in orphan_memories:
+            db.delete(mem)
+        stats["memories_deleted"] += len(orphan_ids)
+
+    db.query(ProjectInvite).filter(ProjectInvite.created_by_id == target.id).delete()
+    db.query(App).filter(App.owner_id == target.id).delete()
+
+    db.delete(target)
+    db.commit()
+
+    logger.info("Purged user '%s': %s", username, stats)
+    return {"message": f"User '{username}' purged", **stats}

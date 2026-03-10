@@ -64,6 +64,7 @@ def update_user(
 @router.delete("/{user_id}")
 def deactivate_user(
     user_id: str,
+    permanent: bool = False,
     db: Session = Depends(get_db),
     admin: User = Depends(require_superadmin),
 ):
@@ -71,7 +72,15 @@ def deactivate_user(
     if not user:
         raise HTTPException(404, "User not found")
     if user.id == admin.id:
-        raise HTTPException(400, "Cannot deactivate yourself")
+        raise HTTPException(400, "Cannot delete yourself")
+
+    if permanent:
+        from models import ApiKey
+        db.query(ApiKey).filter(ApiKey.user_id == user.id).delete()
+        db.delete(user)
+        db.commit()
+        return {"message": f"User {user.username} permanently deleted"}
+
     user.is_active = False
     db.commit()
     return {"message": f"User {user.username} deactivated"}
