@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Eye, EyeOff, Download, Upload } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { Input } from "./ui/input"
@@ -11,8 +11,8 @@ import { Button } from "./ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Textarea } from "./ui/textarea"
 import { useRef, useState as useReactState } from "react"
-import { useSelector } from "react-redux"
-import { RootState } from "@/store/store"
+import { TOKEN_COOKIE, getCookie } from "@/lib/auth"
+import api from "@/lib/api"
 
 interface FormViewProps {
   settings: any
@@ -25,9 +25,21 @@ export function FormView({ settings, onChange }: FormViewProps) {
   const [showEmbedderApiKey, setShowEmbedderApiKey] = useState(false)
   const [isUploading, setIsUploading] = useReactState(false)
   const [selectedImportFileName, setSelectedImportFileName] = useReactState("")
+  const [importResult, setImportResult] = useReactState("")
+  const [projects, setProjects] = useReactState<{slug: string; name: string}[]>([])
+  const [selectedProjectSlug, setSelectedProjectSlug] = useReactState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
-  const userId = useSelector((state: RootState) => state.profile.userId)
+
+  useEffect(() => {
+    api.get("/api/v1/projects").then((res) => {
+      const list = (res.data || []).map((p: any) => ({ slug: p.slug, name: p.name }))
+      setProjects(list)
+      if (list.length > 0 && !selectedProjectSlug) {
+        setSelectedProjectSlug(list[0].slug)
+      }
+    }).catch(() => {})
+  }, [])
 
   const handleOpenMemoryChange = (key: string, value: any) => {
     onChange({
@@ -473,6 +485,25 @@ export function FormView({ settings, onChange }: FormViewProps) {
           <CardDescription>Export or import your memories</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Project selector */}
+          <div className="space-y-2">
+            <Label>Target Project</Label>
+            <Select value={selectedProjectSlug} onValueChange={setSelectedProjectSlug}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Projects</SelectItem>
+                {projects.map((p) => (
+                  <SelectItem key={p.slug} value={p.slug}>{p.name} ({p.slug})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Export: filter by project (or All). Import: target project for imported memories.
+            </p>
+          </div>
+
           {/* Export Section */}
           <div className="p-4 border border-zinc-800 rounded-lg space-y-2">
             <div className="text-sm font-medium">Export</div>
@@ -483,10 +514,16 @@ export function FormView({ settings, onChange }: FormViewProps) {
                 className="bg-zinc-800 hover:bg-zinc-700"
                 onClick={async () => {
                   try {
+                    const token = getCookie(TOKEN_COOKIE)
+                    const slug = selectedProjectSlug === "__all__" ? "" : selectedProjectSlug
                     const res = await fetch(`${API_URL}/api/v1/backup/export`, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json", Accept: "application/zip" },
-                      body: JSON.stringify({ user_id: userId }),
+                      headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/zip",
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      },
+                      body: JSON.stringify({ project_slug: slug || undefined }),
                     })
                     if (!res.ok) throw new Error(`Export failed with status ${res.status}`)
                     const blob = await res.blob()
@@ -512,7 +549,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
           {/* Import Section */}
           <div className="p-4 border border-zinc-800 rounded-lg space-y-2">
             <div className="text-sm font-medium">Import</div>
-            <p className="text-xs text-muted-foreground">Upload a ZIP exported by OpenMemory. Default settings will be used.</p>
+            <p className="text-xs text-muted-foreground">Upload a ZIP exported by OpenMemory. Memories will be imported into the selected project.</p>
             <div className="flex items-center gap-3 flex-wrap">
               <input
                 ref={fileInputRef}
@@ -523,6 +560,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
                   const f = evt.target.files?.[0]
                   if (!f) return
                   setSelectedImportFileName(f.name)
+                  setImportResult("")
                 }}
               />
               <Button
@@ -547,12 +585,22 @@ export function FormView({ settings, onChange }: FormViewProps) {
                     if (!file) return
                     try {
                       setIsUploading(true)
+                      setImportResult("")
                       const form = new FormData()
                       form.append("file", file)
-                      form.append("user_id", String(userId))
-                      const res = await fetch(`${API_URL}/api/v1/backup/import`, { method: "POST", body: form })
+                      const slug = selectedProjectSlug === "__all__" ? "" : selectedProjectSlug
+                      if (slug) form.append("project_slug", slug)
+                      const importToken = getCookie(TOKEN_COOKIE)
+                      const res = await fetch(`${API_URL}/api/v1/backup/import`, {
+                        method: "POST",
+                        headers: importToken ? { Authorization: `Bearer ${importToken}` } : {},
+                        body: form,
+                      })
                       if (!res.ok) throw new Error(`Import failed with status ${res.status}`)
-                      await res.json()
+                      const data = await res.json()
+                      setImportResult(
+                        `Imported ${data.imported ?? 0}, skipped ${data.skipped ?? 0}, vectors ${data.qdrant_upserted ?? 0} → ${data.project_slug ?? ""}`
+                      )
                       if (fileInputRef.current) fileInputRef.current.value = ""
                       setSelectedImportFileName("")
                     } catch (e) {
@@ -567,6 +615,9 @@ export function FormView({ settings, onChange }: FormViewProps) {
                 </Button>
               </div>
             </div>
+            {importResult && (
+              <p className="text-xs text-green-400 mt-2">{importResult}</p>
+            )}
           </div>
         </CardContent>
       </Card>

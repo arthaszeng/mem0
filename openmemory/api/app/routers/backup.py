@@ -1,42 +1,45 @@
 from datetime import UTC, datetime
-import io 
-import json 
-import gzip 
+import io
+import json
+import gzip
+import logging
 import zipfile
-from typing import Optional, List, Dict, Any
-from uuid import UUID
+from typing import Optional, Dict, Any
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
+from qdrant_client.models import FieldCondition, Filter, MatchValue, ScrollRequest
 
 from app.database import get_db
 from app.models import (
-    User, App, Memory, MemoryState, Category, memory_categories, 
-    MemoryStatusHistory, AccessControl
+    User, App, Memory, MemoryState, Category, memory_categories,
+    MemoryStatusHistory, AccessControl, Project, ProjectMember,
 )
 from app.utils.memory import get_memory_client
+from app.utils.gateway_auth import (
+    AuthenticatedUser, get_authenticated_user, resolve_project, ProjectRole,
+)
 
-from uuid import uuid4
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/backup", tags=["backup"])
 
-class ExportRequest(BaseModel):
-    user_id: str
-    app_id: Optional[UUID] = None
-    from_date: Optional[int] = None
-    to_date: Optional[int] = None
-    include_vectors: bool = True
 
-def _iso(dt: Optional[datetime]) -> Optional[str]: 
-    if isinstance(dt, datetime): 
-        try: 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    if isinstance(dt, datetime):
+        try:
             return dt.astimezone(UTC).isoformat()
-        except: 
+        except Exception:
             return dt.replace(tzinfo=UTC).isoformat()
     return None
+
 
 def _parse_iso(dt: Optional[str]) -> Optional[datetime]:
     if not dt:
@@ -49,24 +52,140 @@ def _parse_iso(dt: Optional[str]) -> Optional[datetime]:
         except Exception:
             return None
 
-def _export_sqlite(db: Session, req: ExportRequest) -> Dict[str, Any]: 
-    user = db.query(User).filter(User.user_id == req.user_id).first()
-    if not user: 
-        raise HTTPException(status_code=404, detail="User not found")
-    
+
+def _get_user_default_project(db: Session, user: User) -> Optional[Project]:
+    """Return the user's first owned project (personal default)."""
+    member = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.user_id == user.id, ProjectMember.role == ProjectRole.owner)
+        .first()
+    )
+    if member:
+        return db.query(Project).filter(Project.id == member.project_id).first()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 0. Data Migration: backfill project_id for existing memories
+# ---------------------------------------------------------------------------
+
+@router.post("/migrate-project")
+async def migrate_project_ids(
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Backfill project_id on memories where it is NULL.
+
+    - SQLite: set project_id to the user's default project
+    - Qdrant: set_payload to add project_id for matching points
+    Superadmin only.
+    """
+    if not auth.is_superadmin:
+        raise HTTPException(403, "Superadmin required")
+
+    user = auth.db_user
+    project = _get_user_default_project(db, user)
+    if not project:
+        raise HTTPException(400, "No default project found for user")
+
+    # --- SQLite ---
+    orphan_memories = (
+        db.query(Memory)
+        .filter(Memory.user_id == user.id, Memory.project_id.is_(None))
+        .all()
+    )
+    sqlite_count = len(orphan_memories)
+    for m in orphan_memories:
+        m.project_id = project.id
+    db.commit()
+    logger.info("SQLite migration: set project_id on %d memories for user %s", sqlite_count, user.user_id)
+
+    # --- Qdrant ---
+    qdrant_count = 0
+    memory_client = get_memory_client()
+    if memory_client:
+        vs = getattr(memory_client, "vector_store", None)
+        if vs and hasattr(vs, "client"):
+            collection = vs.collection_name
+            offset = None
+            while True:
+                result = vs.client.scroll(
+                    collection_name=collection,
+                    scroll_filter=Filter(must=[
+                        FieldCondition(key="user_id", match=MatchValue(value=user.user_id)),
+                    ]),
+                    limit=100,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                points, next_offset = result
+                ids_to_update = []
+                for pt in points:
+                    payload = pt.payload or {}
+                    if not payload.get("project_id"):
+                        ids_to_update.append(pt.id)
+
+                if ids_to_update:
+                    vs.client.set_payload(
+                        collection_name=collection,
+                        payload={"project_id": str(project.id)},
+                        points=ids_to_update,
+                    )
+                    qdrant_count += len(ids_to_update)
+
+                if next_offset is None:
+                    break
+                offset = next_offset
+
+    logger.info("Qdrant migration: set project_id on %d points for user %s", qdrant_count, user.user_id)
+
+    return {
+        "message": f"Migration complete for user '{user.user_id}'",
+        "project_slug": project.slug,
+        "project_name": project.name,
+        "sqlite_updated": sqlite_count,
+        "qdrant_updated": qdrant_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 1. Export
+# ---------------------------------------------------------------------------
+
+class ExportRequest(BaseModel):
+    app_id: Optional[UUID] = None
+    from_date: Optional[int] = None
+    to_date: Optional[int] = None
+    project_slug: Optional[str] = None
+    include_vectors: bool = True
+
+
+def _export_sqlite(
+    db: Session,
+    user: User,
+    req: ExportRequest,
+    project: Optional[Project] = None,
+) -> Dict[str, Any]:
     time_filters = []
-    if req.from_date: 
+    if req.from_date:
         time_filters.append(Memory.created_at >= datetime.fromtimestamp(req.from_date, tz=UTC))
-    if req.to_date: 
+    if req.to_date:
         time_filters.append(Memory.created_at <= datetime.fromtimestamp(req.to_date, tz=UTC))
 
     mem_q = (
         db.query(Memory)
-        .options(joinedload(Memory.categories), joinedload(Memory.app))
+        .options(
+            joinedload(Memory.categories),
+            joinedload(Memory.app),
+            joinedload(Memory.project),
+            joinedload(Memory.user),
+        )
         .filter(
-            Memory.user_id == user.id, 
-            *(time_filters or []), 
-            * ( [Memory.app_id == req.app_id] if req.app_id else [] ),
+            Memory.user_id == user.id,
+            *(time_filters or []),
+            *([Memory.app_id == req.app_id] if req.app_id else []),
+            *([Memory.project_id == project.id] if project else []),
         )
     )
 
@@ -76,153 +195,166 @@ def _export_sqlite(db: Session, req: ExportRequest) -> Dict[str, Any]:
     app_ids = sorted({m.app_id for m in memories if m.app_id})
     apps = db.query(App).filter(App.id.in_(app_ids)).all() if app_ids else []
 
-    cats = sorted({c for m in memories for c in m.categories}, key = lambda c: str(c.id))
+    cats = sorted({c for m in memories for c in m.categories}, key=lambda c: str(c.id))
 
-    mc_rows = db.execute(
-        memory_categories.select().where(memory_categories.c.memory_id.in_(memory_ids))
-    ).fetchall() if memory_ids else []
+    mc_rows = (
+        db.execute(memory_categories.select().where(memory_categories.c.memory_id.in_(memory_ids))).fetchall()
+        if memory_ids else []
+    )
 
-    history = db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(memory_ids)).all() if memory_ids else []
+    history = (
+        db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(memory_ids)).all()
+        if memory_ids else []
+    )
 
-    acls = db.query(AccessControl).filter(
-        AccessControl.subject_type == "app", 
-        AccessControl.subject_id.in_(app_ids) if app_ids else False
-    ).all() if app_ids else []
+    acls = (
+        db.query(AccessControl).filter(
+            AccessControl.subject_type == "app",
+            AccessControl.subject_id.in_(app_ids) if app_ids else False,
+        ).all()
+        if app_ids else []
+    )
+
+    # Collect referenced projects
+    project_ids = sorted({m.project_id for m in memories if m.project_id})
+    projects = db.query(Project).filter(Project.id.in_(project_ids)).all() if project_ids else []
+    project_map = {p.id: p for p in projects}
 
     return {
         "user": {
-            "id": str(user.id), 
-            "user_id": user.user_id, 
-            "name": user.name, 
-            "email": user.email, 
-            "metadata": user.metadata_, 
-            "created_at": _iso(user.created_at), 
-            "updated_at": _iso(user.updated_at)
-        }, 
+            "id": str(user.id),
+            "user_id": user.user_id,
+            "name": user.name,
+            "email": user.email,
+            "metadata": user.metadata_,
+            "created_at": _iso(user.created_at),
+            "updated_at": _iso(user.updated_at),
+        },
+        "projects": [
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "slug": p.slug,
+                "owner_username": p.owner.user_id if p.owner else None,
+                "description": p.description,
+            }
+            for p in projects
+        ],
         "apps": [
             {
-                "id": str(a.id), 
-                "owner_id": str(a.owner_id), 
-                "name": a.name, 
-                "description": a.description, 
-                "metadata": a.metadata_, 
-                "is_active": a.is_active, 
-                "created_at": _iso(a.created_at), 
+                "id": str(a.id),
+                "owner_id": str(a.owner_id),
+                "name": a.name,
+                "description": a.description,
+                "metadata": a.metadata_,
+                "is_active": a.is_active,
+                "created_at": _iso(a.created_at),
                 "updated_at": _iso(a.updated_at),
             }
             for a in apps
-        ], 
+        ],
         "categories": [
             {
-                "id": str(c.id), 
-                "name": c.name, 
-                "description": c.description, 
-                "created_at": _iso(c.created_at), 
-                "updated_at": _iso(c.updated_at), 
+                "id": str(c.id),
+                "name": c.name,
+                "description": c.description,
+                "created_at": _iso(c.created_at),
+                "updated_at": _iso(c.updated_at),
             }
             for c in cats
-        ], 
+        ],
         "memories": [
             {
-                "id": str(m.id), 
-                "user_id": str(m.user_id), 
-                "app_id": str(m.app_id) if m.app_id else None, 
-                "content": m.content, 
-                "metadata": m.metadata_, 
+                "id": str(m.id),
+                "user_id": str(m.user_id),
+                "app_id": str(m.app_id) if m.app_id else None,
+                "app_name": m.app.name if m.app else None,
+                "project_id": str(m.project_id) if m.project_id else None,
+                "project_slug": m.project.slug if m.project else None,
+                "creator_username": m.user.user_id if m.user else None,
+                "content": m.content,
+                "metadata": m.metadata_,
                 "state": m.state.value,
-                "created_at": _iso(m.created_at), 
-                "updated_at": _iso(m.updated_at), 
-                "archived_at": _iso(m.archived_at), 
-                "deleted_at": _iso(m.deleted_at), 
-                "category_ids": [str(c.id) for c in m.categories], #TODO: figure out a way to add category names simply to this
+                "created_at": _iso(m.created_at),
+                "updated_at": _iso(m.updated_at),
+                "archived_at": _iso(m.archived_at),
+                "deleted_at": _iso(m.deleted_at),
+                "category_ids": [str(c.id) for c in m.categories],
             }
             for m in memories
-        ], 
+        ],
         "memory_categories": [
             {"memory_id": str(r.memory_id), "category_id": str(r.category_id)}
             for r in mc_rows
-        ], 
+        ],
         "status_history": [
             {
-                "id": str(h.id), 
-                "memory_id": str(h.memory_id), 
-                "changed_by": str(h.changed_by), 
-                "old_state": h.old_state.value, 
-                "new_state": h.new_state.value, 
-                "changed_at": _iso(h.changed_at), 
+                "id": str(h.id),
+                "memory_id": str(h.memory_id),
+                "changed_by": str(h.changed_by),
+                "old_state": h.old_state.value,
+                "new_state": h.new_state.value,
+                "changed_at": _iso(h.changed_at),
             }
             for h in history
-        ], 
+        ],
         "access_controls": [
             {
-                "id": str(ac.id), 
-                "subject_type": ac.subject_type, 
-                "subject_id": str(ac.subject_id) if ac.subject_id else None, 
-                "object_type": ac.object_type, 
-                "object_id": str(ac.object_id) if ac.object_id else None, 
-                "effect": ac.effect, 
-                "created_at": _iso(ac.created_at), 
+                "id": str(ac.id),
+                "subject_type": ac.subject_type,
+                "subject_id": str(ac.subject_id) if ac.subject_id else None,
+                "object_type": ac.object_type,
+                "object_id": str(ac.object_id) if ac.object_id else None,
+                "effect": ac.effect,
+                "created_at": _iso(ac.created_at),
             }
             for ac in acls
-        ], 
+        ],
         "export_meta": {
             "app_id_filter": str(req.app_id) if req.app_id else None,
+            "project_slug_filter": req.project_slug,
             "from_date": req.from_date,
             "to_date": req.to_date,
-            "version": "1",
+            "version": "2",
             "generated_at": datetime.now(UTC).isoformat(),
         },
     }
 
+
 def _export_logical_memories_gz(
-        db: Session, 
-        *, 
-        user_id: str, 
-        app_id: Optional[UUID] = None, 
-        from_date: Optional[int] = None, 
-        to_date: Optional[int] = None
-) -> bytes: 
-    """
-    Export a provider-agnostic backup of memories so they can be restored to any vector DB
-    by re-embedding content. One JSON object per line, gzip-compressed.
-
-    Schema (per line):
-    {
-      "id": "<uuid>",
-      "content": "<text>",
-      "metadata": {...},
-      "created_at": "<iso8601 or null>",
-      "updated_at": "<iso8601 or null>",
-      "state": "active|paused|archived|deleted",
-      "app": "<app name or null>",
-      "categories": ["catA", "catB", ...]
-    }
-    """
-
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user: 
-        raise HTTPException(status_code=404, detail="User not found")
-    
+    db: Session,
+    *,
+    user: User,
+    app_id: Optional[UUID] = None,
+    from_date: Optional[int] = None,
+    to_date: Optional[int] = None,
+    project: Optional[Project] = None,
+) -> bytes:
     time_filters = []
-    if from_date: 
+    if from_date:
         time_filters.append(Memory.created_at >= datetime.fromtimestamp(from_date, tz=UTC))
-    if to_date: 
+    if to_date:
         time_filters.append(Memory.created_at <= datetime.fromtimestamp(to_date, tz=UTC))
-    
+
     q = (
         db.query(Memory)
-        .options(joinedload(Memory.categories), joinedload(Memory.app))
+        .options(
+            joinedload(Memory.categories),
+            joinedload(Memory.app),
+            joinedload(Memory.project),
+        )
         .filter(
             Memory.user_id == user.id,
             *(time_filters or []),
+            *([Memory.project_id == project.id] if project else []),
         )
     )
     if app_id:
         q = q.filter(Memory.app_id == app_id)
 
     buf = io.BytesIO()
-    with gzip.GzipFile(fileobj=buf, mode="wb") as gz: 
-        for m in q.all(): 
+    with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
+        for m in q.all():
             record = {
                 "id": str(m.id),
                 "content": m.content,
@@ -232,53 +364,70 @@ def _export_logical_memories_gz(
                 "state": m.state.value,
                 "app": m.app.name if m.app else None,
                 "categories": [c.name for c in m.categories],
+                "project_slug": m.project.slug if m.project else None,
+                "creator_username": user.user_id,
             }
             gz.write((json.dumps(record) + "\n").encode("utf-8"))
     return buf.getvalue()
 
+
 @router.post("/export")
-async def export_backup(req: ExportRequest, db: Session = Depends(get_db)): 
-    sqlite_payload = _export_sqlite(db=db, req=req)
+async def export_backup(
+    req: ExportRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    user = auth.db_user
+
+    project = None
+    if req.project_slug:
+        pctx = resolve_project(auth, db, req.project_slug)
+        project = pctx.project if pctx else None
+
+    sqlite_payload = _export_sqlite(db=db, user=user, req=req, project=project)
     memories_blob = _export_logical_memories_gz(
-        db=db, 
-        user_id=req.user_id, 
-        app_id=req.app_id, 
-        from_date=req.from_date, 
+        db=db,
+        user=user,
+        app_id=req.app_id,
+        from_date=req.from_date,
         to_date=req.to_date,
-
+        project=project,
     )
-
-    #TODO: add vector store specific exports in future for speed 
 
     zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf: 
+    with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("memories.json", json.dumps(sqlite_payload, indent=2))
         zf.writestr("memories.jsonl.gz", memories_blob)
-        
+
     zip_buf.seek(0)
     return StreamingResponse(
-        zip_buf, 
-        media_type="application/zip", 
-        headers={"Content-Disposition": f'attachment; filename="memories_export_{req.user_id}.zip"'},
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="memories_export_{auth.username}.zip"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# 2. Import
+# ---------------------------------------------------------------------------
 
 @router.post("/import")
 async def import_backup(
-    file: UploadFile = File(..., description="Zip with memories.json and memories.jsonl.gz"), 
-    user_id: str = Form(..., description="Import memories into this user_id"),
-    mode: str = Query("overwrite"), 
-    db: Session = Depends(get_db)
-): 
-    if not file.filename.endswith(".zip"): 
+    file: UploadFile = File(..., description="Zip with memories.json and memories.jsonl.gz"),
+    project_slug: Optional[str] = Form(None, description="Target project slug (required for v1 import)"),
+    mode: str = Query("overwrite"),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Expected a zip file.")
-    
+
     if mode not in {"skip", "overwrite"}:
         raise HTTPException(status_code=400, detail="Invalid mode. Must be 'skip' or 'overwrite'.")
-    
-    user = db.query(User).filter(User.user_id == user_id).first()
-    if not user: 
-        raise HTTPException(status_code=404, detail="User not found")
 
+    user = auth.db_user
+
+    # --- Parse ZIP ---
     content = await file.read()
     try:
         with zipfile.ZipFile(io.BytesIO(content), "r") as zf:
@@ -286,10 +435,9 @@ async def import_backup(
 
             def find_member(filename: str) -> Optional[str]:
                 for name in names:
-                    # Skip directory entries
-                    if name.endswith('/'):
+                    if name.endswith("/"):
                         continue
-                    if name.rsplit('/', 1)[-1] == filename:
+                    if name.rsplit("/", 1)[-1] == filename:
                         return name
                 return None
 
@@ -298,35 +446,67 @@ async def import_backup(
                 raise HTTPException(status_code=400, detail="memories.json missing in zip")
 
             memories_member = find_member("memories.jsonl.gz")
-
             sqlite_data = json.loads(zf.read(sqlite_member))
             memories_blob = zf.read(memories_member) if memories_member else None
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid zip file")
 
+    export_version = sqlite_data.get("export_meta", {}).get("version", "1")
+
+    # --- Resolve target project ---
+    target_project = None
+    if project_slug:
+        pctx = resolve_project(auth, db, project_slug, min_role=ProjectRole.read_write)
+        if pctx:
+            target_project = pctx.project
+    if not target_project:
+        target_project = _get_user_default_project(db, user)
+    if not target_project:
+        raise HTTPException(400, "No target project available. Specify project_slug or create a project first.")
+
+    # --- Ensure default app, build app lookup ---
     default_app = db.query(App).filter(App.owner_id == user.id, App.name == "openmemory").first()
-    if not default_app: 
+    if not default_app:
         default_app = App(owner_id=user.id, name="openmemory", is_active=True, metadata_={})
         db.add(default_app)
         db.commit()
         db.refresh(default_app)
 
+    def _resolve_app(app_name: Optional[str]) -> App:
+        if not app_name:
+            return default_app
+        existing = db.query(App).filter(App.owner_id == user.id, App.name == app_name).first()
+        if existing:
+            return existing
+        new_app = App(owner_id=user.id, name=app_name, is_active=True, metadata_={})
+        db.add(new_app)
+        db.commit()
+        db.refresh(new_app)
+        return new_app
+
+    # --- Import categories ---
     cat_id_map: Dict[str, UUID] = {}
-    for c in sqlite_data.get("categories", []): 
+    for c in sqlite_data.get("categories", []):
         cat = db.query(Category).filter(Category.name == c["name"]).first()
-        if not cat: 
+        if not cat:
             cat = Category(name=c["name"], description=c.get("description"))
             db.add(cat)
             db.commit()
             db.refresh(cat)
         cat_id_map[c["id"]] = cat.id
 
+    # --- Import memories (SQLite) ---
     old_to_new_id: Dict[str, UUID] = {}
-    for m in sqlite_data.get("memories", []): 
+    app_for_memory: Dict[str, str] = {}
+    imported_count = 0
+    skipped_count = 0
+
+    for m in sqlite_data.get("memories", []):
         incoming_id = UUID(m["id"])
         existing = db.query(Memory).filter(Memory.id == incoming_id).first()
 
-        # Cross-user collision: always mint a new UUID and import as a new memory
         if existing and existing.user_id != user.id:
             target_id = uuid4()
         else:
@@ -334,34 +514,46 @@ async def import_backup(
 
         old_to_new_id[m["id"]] = target_id
 
-        # Same-user collision + skip mode: leave existing row untouched
-        if existing and (existing.user_id == user.id) and mode == "skip": 
-            continue 
-        
-        # Same-user collision + overwrite mode: treat import as ground truth
-        if existing and (existing.user_id == user.id) and mode == "overwrite": 
+        # Resolve app from export data
+        app_name = m.get("app_name") or None
+        app_obj = _resolve_app(app_name)
+        app_for_memory[m["id"]] = app_obj.name
+
+        # Resolve per-memory project: form param > per-memory slug > default
+        mem_project = target_project
+        if export_version >= "2" and not project_slug and m.get("project_slug"):
+            pctx = resolve_project(auth, db, m["project_slug"], min_role=ProjectRole.read_write)
+            if pctx:
+                mem_project = pctx.project
+
+        if existing and (existing.user_id == user.id) and mode == "skip":
+            skipped_count += 1
+            continue
+
+        if existing and (existing.user_id == user.id) and mode == "overwrite":
             incoming_state = m.get("state", "active")
-            existing.user_id = user.id 
-            existing.app_id = default_app.id
+            existing.app_id = app_obj.id
+            existing.project_id = mem_project.id
             existing.content = m.get("content") or ""
             existing.metadata_ = m.get("metadata") or {}
-            try: 
+            try:
                 existing.state = MemoryState(incoming_state)
-            except Exception: 
+            except Exception:
                 existing.state = MemoryState.active
-            # Update state-related timestamps from import (ground truth)
             existing.archived_at = _parse_iso(m.get("archived_at"))
             existing.deleted_at = _parse_iso(m.get("deleted_at"))
             existing.created_at = _parse_iso(m.get("created_at")) or existing.created_at
             existing.updated_at = _parse_iso(m.get("updated_at")) or existing.updated_at
             db.add(existing)
             db.commit()
+            imported_count += 1
             continue
 
         new_mem = Memory(
             id=target_id,
             user_id=user.id,
-            app_id=default_app.id,
+            app_id=app_obj.id,
+            project_id=mem_project.id,
             content=m.get("content") or "",
             metadata_=m.get("metadata") or {},
             state=MemoryState(m.get("state", "active")) if m.get("state") else MemoryState.active,
@@ -372,23 +564,25 @@ async def import_backup(
         )
         db.add(new_mem)
         db.commit()
+        imported_count += 1
 
-    for link in sqlite_data.get("memory_categories", []): 
+    # --- Import memory_categories ---
+    for link in sqlite_data.get("memory_categories", []):
         mid = old_to_new_id.get(link["memory_id"])
         cid = cat_id_map.get(link["category_id"])
-        if not (mid and cid): 
+        if not (mid and cid):
             continue
         exists = db.execute(
             memory_categories.select().where(
                 (memory_categories.c.memory_id == mid) & (memory_categories.c.category_id == cid)
             )
         ).first()
-
-        if not exists: 
+        if not exists:
             db.execute(memory_categories.insert().values(memory_id=mid, category_id=cid))
             db.commit()
 
-    for h in sqlite_data.get("status_history", []): 
+    # --- Import status_history ---
+    for h in sqlite_data.get("status_history", []):
         hid = UUID(h["id"])
         mem_id = old_to_new_id.get(h["memory_id"], UUID(h["memory_id"]))
         exists = db.query(MemoryStatusHistory).filter(MemoryStatusHistory.id == hid).first()
@@ -407,6 +601,8 @@ async def import_backup(
         db.add(rec)
         db.commit()
 
+    # --- Qdrant upsert ---
+    qdrant_count = 0
     memory_client = get_memory_client()
     vector_store = getattr(memory_client, "vector_store", None) if memory_client else None
 
@@ -425,15 +621,17 @@ async def import_backup(
                         "metadata": m.get("metadata") or {},
                         "created_at": m.get("created_at"),
                         "updated_at": m.get("updated_at"),
+                        "app_name": m.get("app_name"),
                     }
 
         for rec in iter_logical_records():
             old_id = rec["id"]
             new_id = old_to_new_id.get(old_id, UUID(old_id))
-            content = rec.get("content") or ""
+            rec_content = rec.get("content") or ""
             metadata = rec.get("metadata") or {}
             created_at = rec.get("created_at")
             updated_at = rec.get("updated_at")
+            rec_app_name = rec.get("app") or rec.get("app_name") or app_for_memory.get(old_id, "openmemory")
 
             if mode == "skip":
                 try:
@@ -444,56 +642,28 @@ async def import_backup(
                     pass
 
             payload = dict(metadata)
-            payload["data"] = content
+            payload["data"] = rec_content
             if created_at:
                 payload["created_at"] = created_at
             if updated_at:
                 payload["updated_at"] = updated_at
-            payload["user_id"] = user_id
-            payload.setdefault("source_app", "openmemory")
+            payload["user_id"] = auth.username
+            payload["project_id"] = str(target_project.id)
+            payload["source_app"] = "openmemory"
+            payload["mcp_client"] = rec_app_name
 
             try:
-                vec = memory_client.embedding_model.embed(content, "add")
+                vec = memory_client.embedding_model.embed(rec_content, "add")
                 vector_store.insert(vectors=[vec], payloads=[payload], ids=[str(new_id)])
+                qdrant_count += 1
             except Exception as e:
-                print(f"Vector upsert failed for memory {new_id}: {e}")
+                logger.warning("Vector upsert failed for memory %s: %s", new_id, e)
                 continue
 
-        return {"message": f'Import completed into user "{user_id}"'}
-
-    return {"message": f'Import completed into user "{user_id}"'}
-
-
-    
-            
-        
- 
-
-
-    
-
-    
-
-
-
-
-
-
-    
-
-    
-
-
-
-
-
-
-
-
-
-
- 
-
-
-
-
+    return {
+        "message": f"Import completed into project '{target_project.slug}'",
+        "project_slug": target_project.slug,
+        "imported": imported_count,
+        "skipped": skipped_count,
+        "qdrant_upserted": qdrant_count,
+    }
