@@ -52,22 +52,38 @@
 ### 2. ChatGPT Custom GPT（Actions / REST API）
 
 适用于 OpenAI ChatGPT 自定义 GPT。因 GPT Actions 不支持 SSE，通过 REST API 接入。
+提供两套独立配置，可创建两个 GPT 或按需组合。
+
+#### 2a. OpenMemory GPT（记忆系统）
 
 **配置文件**:
-- OpenAPI Schema: [`chatgpt-action-schema.json`](./chatgpt-action-schema.json)
-- System Prompt: [`system-prompt.md`](./system-prompt.md)
+- OpenAPI Schema: [`chatgpt-memory-schema.json`](./chatgpt-memory-schema.json)
+- System Prompt: [`system-prompt-memory.md`](./system-prompt-memory.md)
 
 **设置步骤**:
 1. 在 ChatGPT 中创建自定义 GPT
-2. 粘贴 `system-prompt.md` 的内容作为 Instructions
-3. 在 Actions → Import from URL / Paste Schema 中导入 `chatgpt-action-schema.json`
-4. **将 Schema 中的 server URL 替换为实际的 Tunnel URL**（见下方获取方式）
-5. 配置 Authentication:
+2. 粘贴 `system-prompt-memory.md` 的内容作为 Instructions
+3. 在 Actions → Import from URL / Paste Schema 中导入 `chatgpt-memory-schema.json`
+4. 配置 Authentication:
    - Authentication Type: **API Key**
    - API Key: 服务器上 `docker exec openmemory-openmemory-mcp-1 env | grep API_KEY` 的值
    - Auth Type: **Custom**
    - Custom Header Name: `X-API-Key`
-6. 点击 "Test" 验证每个 Action 能否正常调用
+5. 点击 "Test" 验证每个 Action 能否正常调用
+
+#### 2b. Concierge GPT（Sanofi AI 助手）
+
+**配置文件**:
+- OpenAPI Schema: [`chatgpt-concierge-schema.json`](./chatgpt-concierge-schema.json)
+- System Prompt: [`system-prompt-concierge.md`](./system-prompt-concierge.md)
+
+**设置步骤**:
+1. 在 ChatGPT 中创建自定义 GPT
+2. 粘贴 `system-prompt-concierge.md` 的内容作为 Instructions
+3. 在 Actions → Paste Schema 中导入 `chatgpt-concierge-schema.json`
+4. Authentication: **None**（Concierge 使用服务器端 Sanofi 会话，无需 API Key）
+5. **前提**：使用前需通过 Concierge Chrome 扩展完成 Sanofi 认证
+6. 点击 "Test" 验证 `conciergeAuthStatus` 返回 `{"connected": true}`
 
 **Cloudflare Tunnel（绕过 ICP）**:
 
