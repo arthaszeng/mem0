@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "OpenMemory": {
+      "url": "http://47.108.141.20/memory-mcp/{client_name}/sse/{user_id}"
+    },
+    "Concierge": {
+      "url": "http://47.108.141.20/concierge-mcp/sse"
+    }
+  }
+}

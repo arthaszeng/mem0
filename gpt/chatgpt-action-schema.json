@@ -1,0 +1,215 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenMemory API",
+    "description": "Arthas's personal memory system — search, create, and manage memories.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://arthaszeng.top",
+      "description": "Production (requires ICP or tunnel)"
+    }
+  ],
+  "paths": {
+    "/api/v1/memories/search": {
+      "post": {
+        "operationId": "searchMemories",
+        "summary": "Semantic search over memories",
+        "description": "Search memories by semantic similarity. Call this EVERY TIME the user asks a question, to load relevant context from past conversations.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query", "user_id"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Natural language search query"
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "default": "arthaszeng"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Max results to return"
+                  },
+                  "threshold": {
+                    "type": "number",
+                    "default": 0.0,
+                    "description": "Minimum similarity score (0.0 - 1.0)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MemoryResult"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memories/": {
+      "post": {
+        "operationId": "createMemory",
+        "summary": "Create a new memory",
+        "description": "Store a new memory. Call this when the user shares preferences, decisions, facts, or asks you to remember something.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text", "user_id"],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "Memory content — use complete Chinese sentences with full context"
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "default": "arthaszeng"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory created"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listMemories",
+        "summary": "List all memories",
+        "description": "Retrieve a paginated list of all stored memories.",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "default": "arthaszeng" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": { "type": "integer", "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated memory list"
+          }
+        }
+      }
+    },
+    "/api/v1/memories/{memory_id}": {
+      "get": {
+        "operationId": "getMemory",
+        "summary": "Get a specific memory by ID",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory details"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateMemory",
+        "summary": "Update a memory's content",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["memory_content", "user_id"],
+                "properties": {
+                  "memory_content": {
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "default": "arthaszeng"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory updated"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MemoryResult": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "memory": { "type": "string" },
+          "score": { "type": "number" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string", "nullable": true }
+        }
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    }
+  },
+  "security": [
+    { "ApiKeyAuth": [] }
+  ]
+}
