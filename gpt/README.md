@@ -81,15 +81,22 @@ ssh -i ~/.ssh/arthas admin@47.108.141.20 \
 > **安全说明**: API Key 由后端 `ApiKeyMiddleware` 校验，nginx 仅做透传。
 > 不带 Key 或 Key 错误 → 401 Unauthorized。
 
-**服务器 URL 选择**:
-- 域名未备案期间，使用 `https://47.108.141.20`（IP 直连）
-- 备案完成后，改为 `https://arthaszeng.top`
-- 海外客户端可选: Cloudflare Tunnel 暴露 HTTPS 端点
+**服务器 URL**:
 
-**已知限制**:
-- ChatGPT Actions 从美国/海外服务器发起请求，直连中国阿里云服务器可能被 ICP 拦截
-- 域名未备案时，阿里云网关返回 403（"Non-compliance ICP Filing"）
-- 可选方案: Cloudflare Tunnel（`cloudflared tunnel`）暴露本地 8765 端口到公网
+域名未备案期间，ChatGPT 无法直连阿里云（域名 ICP 403 / IP 证书不匹配），
+需通过 Cloudflare Worker 做反向代理。
+
+**Cloudflare Worker 部署**:
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/) → Workers & Pages → Create Worker
+2. 将 [`cloudflare-worker.js`](./cloudflare-worker.js) 的代码粘贴到编辑器
+3. Deploy 后获得 URL，如 `https://openmemory-api.<account>.workers.dev`
+4. 将该 URL 填入 `chatgpt-action-schema.json` 的 `servers[0].url`，以及 ChatGPT Actions 的 Server URL
+
+**安全机制**:
+- Worker 向 nginx 发请求时携带 `X-CF-Worker: openmemory` header
+- nginx HTTP `/api/` location 校验此 header，不匹配则返回 403
+- 后端 `ApiKeyMiddleware` 校验客户端传入的 `X-API-Key`（双重验证）
+- 直接访问 `http://47.108.141.20/api/` 不带 Worker header → 403
 
 ### 3. Lobe Chat（内置）
 
