@@ -62,19 +62,29 @@
 3. 在 Actions → Import from URL / Paste Schema 中导入 `chatgpt-action-schema.json`
 4. 配置 Authentication:
    - Authentication Type: **API Key**
-   - API Key: 填入 nginx 中配置的 `X-API-Key` 值（见 `nginx/nginx.conf` 中 `/api/` location 的 `proxy_set_header`）
+   - API Key: 填入服务器上 `openmemory` 容器的 `API_KEY` 环境变量值
    - Auth Type: **Custom**
    - Custom Header Name: `X-API-Key`
 5. 点击 "Test" 验证每个 Action 能否正常调用
 
-> **注意**: nginx 的 `/api/` location 会自动注入 `X-API-Key` header，
-> 所以即使 ChatGPT 发送的 key 值与实际不同也不影响。但 ChatGPT 要求
-> Authentication 必须配置后才允许发起请求。
+**如何获取 API Key**:
+```bash
+# 方法 1: 从运行中的容器读取
+ssh -i ~/.ssh/arthas admin@47.108.141.20 \
+  "docker exec openmemory-openmemory-mcp-1 env | grep API_KEY"
+
+# 方法 2: 从 .env 文件读取
+ssh -i ~/.ssh/arthas admin@47.108.141.20 \
+  "grep API_KEY ~/mem0/openmemory/.env"
+```
+
+> **安全说明**: API Key 由后端 `ApiKeyMiddleware` 校验，nginx 仅做透传。
+> 不带 Key 或 Key 错误 → 401 Unauthorized。
 
 **服务器 URL 选择**:
-- Schema 默认使用 `https://arthaszeng.top`（需域名已完成 ICP 备案）
-- 如域名不通，可改为 `https://47.108.141.20`（需在 ChatGPT 中忽略证书警告，可能不支持）
-- 最稳定方案: 通过 Cloudflare Tunnel 暴露一个海外可达的 HTTPS 端点
+- 域名未备案期间，使用 `https://47.108.141.20`（IP 直连）
+- 备案完成后，改为 `https://arthaszeng.top`
+- 海外客户端可选: Cloudflare Tunnel 暴露 HTTPS 端点
 
 **已知限制**:
 - ChatGPT Actions 从美国/海外服务器发起请求，直连中国阿里云服务器可能被 ICP 拦截
