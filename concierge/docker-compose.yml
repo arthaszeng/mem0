@@ -1,0 +1,8 @@
+services:
+  concierge-mcp:
+    build: .
+    ports:
+      - "8766:8766"
+    env_file:
+      - .env
+    restart: unless-stopped

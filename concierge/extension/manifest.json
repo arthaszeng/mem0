@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Concierge Cookie Bridge",
+  "version": "1.1.0",
+  "description": "Syncs Concierge authentication cookies to the MCP server for Cursor integration.",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "https://concierge.sanofi.com/*",
+    "http://localhost:8766/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sync Concierge Session"
+  },
+  "externally_connectable": {
+    "matches": ["http://localhost:*/*", "http://47.108.141.20:*/*", "https://*/*"]
+  },
+  "icons": {}
+}
