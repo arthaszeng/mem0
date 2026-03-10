@@ -7,12 +7,12 @@
   },
   "servers": [
     {
-      "url": "https://openmemory-api.<your-account>.workers.dev",
-      "description": "Cloudflare Worker proxy (replace with your actual Worker URL)"
+      "url": "https://arthaszeng.top",
+      "description": "Production — domain (requires ICP filing)"
     },
     {
-      "url": "https://arthaszeng.top",
-      "description": "Direct — domain (requires ICP filing)"
+      "url": "https://47.108.141.20",
+      "description": "Production — IP direct (cert mismatch warning)"
     }
   ],
   "paths": {
