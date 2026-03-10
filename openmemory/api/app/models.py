@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Table,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Session, relationship
 
@@ -33,6 +34,42 @@ class MemoryState(enum.Enum):
     paused = "paused"
     archived = "archived"
     deleted = "deleted"
+
+
+class ProjectRole(enum.Enum):
+    admin = "admin"
+    normal = "normal"
+    read = "read"
+
+
+class Project(Base):
+    __tablename__ = "projects"
+    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False, index=True)
+    owner_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=get_current_utc_time, index=True)
+    updated_at = Column(DateTime, default=get_current_utc_time, onupdate=get_current_utc_time)
+
+    owner = relationship("User", backref="owned_projects")
+    members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
+
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    project_id = Column(UUID, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(Enum(ProjectRole), nullable=False, default=ProjectRole.normal)
+    created_at = Column(DateTime, default=get_current_utc_time)
+
+    project = relationship("Project", back_populates="members")
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_user"),
+    )
 
 
 class User(Base):
@@ -88,6 +125,7 @@ class Memory(Base):
     id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
     user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
     app_id = Column(UUID, ForeignKey("apps.id"), nullable=False, index=True)
+    project_id = Column(UUID, ForeignKey("projects.id"), nullable=True, index=True)
     content = Column(String, nullable=False)
     vector = Column(String)
     metadata_ = Column('metadata', JSON, default=dict)
@@ -101,12 +139,14 @@ class Memory(Base):
 
     user = relationship("User", back_populates="memories")
     app = relationship("App", back_populates="memories")
+    project = relationship("Project", backref="memories")
     categories = relationship("Category", secondary="memory_categories", back_populates="memories")
 
     __table_args__ = (
         Index('idx_memory_user_state', 'user_id', 'state'),
         Index('idx_memory_app_state', 'app_id', 'state'),
         Index('idx_memory_user_app', 'user_id', 'app_id'),
+        Index('idx_memory_project', 'project_id'),
     )
 
 
