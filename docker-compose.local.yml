@@ -1,0 +1,71 @@
+services:
+  # ===== Gateway =====
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - openmemory-mcp
+      - openmemory-ui
+    restart: unless-stopped
+
+  # ===== Auth Service (OAuth 2.1 Authorization Server) =====
+  auth-service:
+    build: openmemory/auth/
+    env_file: .env.local
+    ports:
+      - "8760:8760"
+    volumes:
+      - ./openmemory/auth:/app
+      - auth_data:/data
+    command: >
+      sh -c "uvicorn main:app --host 0.0.0.0 --port 8760 --reload"
+    restart: unless-stopped
+
+  # ===== Vector Store =====
+  mem0-store:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - mem0_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # ===== OpenMemory API + MCP =====
+  openmemory-mcp:
+    build: openmemory/api/
+    env_file: .env.local
+    depends_on:
+      - mem0-store
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./openmemory/api:/usr/src/openmemory
+      - openmemory_data:/data
+    command: >
+      sh -c "uvicorn main:app --host 0.0.0.0 --port 8765 --reload"
+    restart: unless-stopped
+
+  # ===== OpenMemory UI =====
+  openmemory-ui:
+    build:
+      context: openmemory/ui/
+      dockerfile: Dockerfile
+    env_file: .env.local
+    depends_on:
+      - openmemory-mcp
+    restart: unless-stopped
+
+  # ===== Concierge MCP =====
+  concierge-mcp:
+    build: concierge/
+    env_file: .env.local
+    restart: unless-stopped
+
+volumes:
+  auth_data:
+  mem0_storage:
+  openmemory_data:
