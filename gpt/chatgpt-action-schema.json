@@ -8,7 +8,11 @@
   "servers": [
     {
       "url": "https://arthaszeng.top",
-      "description": "Production (requires ICP or tunnel)"
+      "description": "Production — domain (requires ICP filing)"
+    },
+    {
+      "url": "https://47.108.141.20",
+      "description": "Production — IP direct (cert mismatch warning)"
     }
   ],
   "paths": {
