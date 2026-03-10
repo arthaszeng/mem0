@@ -186,6 +186,48 @@ def _authenticate(auth_header: str) -> str:
     raise ConciergeStreamError("Invalid or missing authentication token")
 
 
+# ---------- REST API (for ChatGPT Actions / non-MCP clients) ----------
+
+@app.post(f"{_PREFIX}/api/chat")
+async def api_chat(request: Request):
+    """REST endpoint: chat with Concierge AI. Requires an active session (via Chrome extension)."""
+    body = await request.json()
+    message = body.get("message", "")
+    thread_id = body.get("thread_id", "")
+    if not message:
+        return JSONResponse(status_code=400, content={"error": "Missing 'message' field"})
+
+    token = cookie_store.get_any()
+    if not token:
+        return JSONResponse(status_code=401, content={"error": "No active Concierge session. Authenticate via Chrome extension first."})
+
+    try:
+        result = await concierge.chat(token, message, thread_id=thread_id or None)
+        return {"response": result, "thread_id": thread_id}
+    except ConciergeStreamError as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
+@app.post(f"{_PREFIX}/api/search")
+async def api_search(request: Request):
+    """REST endpoint: search Sanofi knowledge base via Concierge AI."""
+    body = await request.json()
+    query = body.get("query", "")
+    if not query:
+        return JSONResponse(status_code=400, content={"error": "Missing 'query' field"})
+
+    token = cookie_store.get_any()
+    if not token:
+        return JSONResponse(status_code=401, content={"error": "No active Concierge session. Authenticate via Chrome extension first."})
+
+    try:
+        search_prompt = f"Search for: {query}\n\nPlease provide a concise summary of the most relevant results."
+        result = await concierge.chat(token, search_prompt)
+        return {"response": result, "query": query}
+    except ConciergeStreamError as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+
+
 # ---------- Error handler ----------
 
 @app.exception_handler(ConciergeStreamError)

@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "OpenMemory API",
-    "description": "Arthas's personal memory system — search, create, and manage memories.",
-    "version": "1.0.0"
+    "title": "Arthas AI Platform API",
+    "description": "Arthas's personal AI platform — OpenMemory (memory system) + Concierge (Sanofi AI assistant). Both services share a single Cloudflare Tunnel entry point.",
+    "version": "2.0.0"
   },
   "servers": [
     {
@@ -186,6 +186,141 @@
           }
         }
       }
+    },
+    "/concierge-mcp/api/chat": {
+      "post": {
+        "operationId": "conciergeChat",
+        "summary": "Chat with Sanofi Concierge AI",
+        "description": "Send a message to the Sanofi Concierge AI (powered by Claude 4 Sonnet). Use this to ask questions about Sanofi internal knowledge, policies, procedures, IT support, or any general topic. Requires an active Concierge session (authenticated via Chrome extension).",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message"],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "The message to send to Concierge AI"
+                  },
+                  "thread_id": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional thread ID for multi-turn conversations. Leave empty for a new conversation."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Concierge response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "type": "string",
+                      "description": "The full text response from Concierge AI"
+                    },
+                    "thread_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No active Concierge session — user must authenticate via Chrome extension first"
+          },
+          "502": {
+            "description": "Concierge upstream error"
+          }
+        }
+      }
+    },
+    "/concierge-mcp/api/search": {
+      "post": {
+        "operationId": "conciergeSearch",
+        "summary": "Search Sanofi knowledge base via Concierge AI",
+        "description": "Search across Sanofi internal resources (OneSupport, SharePoint, QualiPSO, etc.) via Concierge AI. Requires an active Concierge session.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Search query for Sanofi internal knowledge base"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results from Concierge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "type": "string",
+                      "description": "Summarized search results from Concierge AI"
+                    },
+                    "query": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No active Concierge session"
+          },
+          "502": {
+            "description": "Concierge upstream error"
+          }
+        }
+      }
+    },
+    "/concierge-mcp/auth/status": {
+      "get": {
+        "operationId": "conciergeAuthStatus",
+        "summary": "Check Concierge authentication status",
+        "description": "Check if there is an active Concierge session. If not connected, the user must authenticate via the Chrome extension before using Concierge chat/search.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Authentication status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connected": {
+                      "type": "boolean",
+                      "description": "true if an active Concierge session exists"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -205,7 +340,8 @@
       "ApiKeyAuth": {
         "type": "apiKey",
         "in": "header",
-        "name": "X-API-Key"
+        "name": "X-API-Key",
+        "description": "Required for OpenMemory API endpoints only. Concierge endpoints use session-based auth."
       }
     }
   },

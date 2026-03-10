@@ -1,14 +1,15 @@
 # AI 客户端接入指南
 
-本目录包含将各类 AI 客户端接入 OpenMemory MCP 和 Concierge MCP 的配置模板。
+本目录包含将各类 AI 客户端接入 OpenMemory 和 Concierge 的配置模板。
 
 ## 服务端点
 
-| 服务 | HTTP (MCP SSE) | HTTPS (REST API) |
-|------|----------------|-------------------|
+| 服务 | HTTP (MCP SSE) | REST API |
+|------|----------------|----------|
 | OpenMemory MCP | `http://<host>/memory-mcp/{client}/sse/{user_id}` | — |
-| OpenMemory API | — | `https://<host>/api/v1/memories/` |
+| OpenMemory API | — | `/api/v1/memories/` (需 X-API-Key) |
 | Concierge MCP | `http://<host>/concierge-mcp/sse` | — |
+| Concierge API | — | `/concierge-mcp/api/chat`, `/concierge-mcp/api/search` (需 Sanofi 会话) |
 
 > `<host>` = `47.108.141.20`（IP 直连）或 `arthaszeng.top`（需 ICP 备案后才能用域名）
 
@@ -90,7 +91,15 @@ sudo systemctl stop cloudflared-tunnel     # 停止
 > **注意**: Quick Tunnel 的 URL 在每次服务重启时会变化。
 > 如需固定 URL，可升级为 Cloudflare Named Tunnel（需 Cloudflare 账号登录）。
 
-**流量路径**: ChatGPT → HTTPS → Cloudflare Edge → Tunnel → `127.0.0.1:8765` → 后端
+**流量路径**: ChatGPT → HTTPS → Cloudflare Edge → Tunnel → nginx:80 → 后端
+
+Tunnel 现在指向 nginx HTTP (port 80)，nginx 根据路径路由到不同后端：
+- `/api/` → OpenMemory (port 8765)
+- `/concierge-mcp/` → Concierge (port 8767)
+
+**认证差异**:
+- OpenMemory API：需要 `X-API-Key` header（在 ChatGPT Actions 中配置）
+- Concierge API：需要服务器上有 Sanofi 活跃会话（通过 Chrome 扩展注入 token），无需额外 header
 
 ### 3. Lobe Chat（内置）
 
