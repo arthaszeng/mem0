@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Copy, Check } from "lucide-react";
 import Image from "next/image";
+import { useProject } from "@/contexts/ProjectContext";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -50,13 +51,17 @@ const allTabs = [{ key: "mcp", label: "MCP Link", icon: "🔗" }, ...clientTabs]
 export const Install = () => {
   const [copiedTab, setCopiedTab] = useState<string | null>(null);
   const user = useSelector((state: RootState) => state.profile.userId) || "user";
+  const { projectSlug } = useProject();
 
   const URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
+  const mcpBase = projectSlug
+    ? `${URL}/memory-mcp/p/${projectSlug}`
+    : `${URL}/memory-mcp`;
 
   const handleCopy = async (tab: string, isMcp: boolean = false) => {
     const text = isMcp
-      ? `${URL}/mcp/openmemory/sse/${user}`
-      : `npx @openmemory/install local ${URL}/mcp/${tab}/sse/${user} --client ${tab}`;
+      ? `${mcpBase}/openmemory/sse`
+      : `npx @openmemory/install local ${mcpBase}/${tab}/sse --client ${tab}`;
 
     try {
       // Try using the Clipboard API first
@@ -136,7 +141,7 @@ export const Install = () => {
               <div className="relative">
                 <pre className="bg-zinc-800 px-4 py-3 rounded-md overflow-x-auto text-sm">
                   <code className="text-gray-300">
-                    {URL}/mcp/openmemory/sse/{user}
+                    {mcpBase}/openmemory/sse
                   </code>
                 </pre>
                 <div>
@@ -172,7 +177,7 @@ export const Install = () => {
                 <div className="relative">
                   <pre className="bg-zinc-800 px-4 py-3 rounded-md overflow-x-auto text-sm">
                     <code className="text-gray-300">
-                      {`npx @openmemory/install local ${URL}/mcp/${key}/sse/${user} --client ${key}`}
+                      {`npx @openmemory/install local ${mcpBase}/${key}/sse --client ${key}`}
                     </code>
                   </pre>
                   <div>

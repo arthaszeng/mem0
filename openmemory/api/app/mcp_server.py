@@ -76,7 +76,7 @@ async def _memory_write_worker():
     while True:
         task = await q.get()
         try:
-            uid, client_name, text = task
+            uid, client_name, text, task_project_slug = task
             memory_client = get_memory_client_safe()
             if not memory_client:
                 logging.warning("Memory worker: client unavailable, dropping task")
@@ -87,7 +87,12 @@ async def _memory_write_worker():
             db = SessionLocal()
             try:
                 user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
-                project_id, _ = _get_user_default_project(db, user.id)
+                # Use explicit project slug from queue, fall back to default
+                pslug_token = project_slug_var.set(task_project_slug or "")
+                try:
+                    project_id, _ = _resolve_project(db, user.id)
+                finally:
+                    project_slug_var.reset(pslug_token)
             finally:
                 db.close()
 
@@ -191,9 +196,10 @@ def get_memory_client_safe():
         logging.warning(f"Failed to get memory client: {e}")
         return None
 
-# Context variables for user_id and client_name
+# Context variables for user_id, client_name, and project_slug
 user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("user_id")
 client_name_var: contextvars.ContextVar[str] = contextvars.ContextVar("client_name")
+project_slug_var: contextvars.ContextVar[str] = contextvars.ContextVar("project_slug", default="")
 
 
 def _get_user_default_project(db, user_id: int) -> "tuple[str | None, str | None]":
@@ -206,6 +212,23 @@ def _get_user_default_project(db, user_id: int) -> "tuple[str | None, str | None
     if not project:
         return None, None
     return str(project.id), project.slug
+
+
+def _resolve_project(db, user_id: int) -> "tuple[str | None, str | None]":
+    """Resolve project from context var or fall back to user's default project."""
+    from app.models import Project, ProjectMember
+    slug = project_slug_var.get("")
+    if slug:
+        project = db.query(Project).filter(Project.slug == slug).first()
+        if project:
+            member = db.query(ProjectMember).filter(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == user_id,
+            ).first()
+            if member:
+                return str(project.id), project.slug
+            logging.warning(f"User {user_id} not a member of project '{slug}', falling back to default")
+    return _get_user_default_project(db, user_id)
 
 # Create a router for MCP endpoints
 mcp_router = APIRouter(prefix="/memory-mcp")
@@ -240,7 +263,8 @@ async def add_memories(text: str) -> str:
         return f"Error: {e}"
 
     q = _get_queue()
-    await q.put((uid, client_name, text))
+    pslug = project_slug_var.get("")
+    await q.put((uid, client_name, text, pslug))
     pending = q.qsize()
     return json.dumps({
         "status": "queued",
@@ -265,7 +289,7 @@ async def search_memory(query: str) -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
-            project_id, _ = _get_user_default_project(db, user.id)
+            project_id, _ = _resolve_project(db, user.id)
 
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
@@ -377,7 +401,7 @@ async def list_memories() -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
-            project_id, _ = _get_user_default_project(db, user.id)
+            project_id, _ = _resolve_project(db, user.id)
 
             memories = await asyncio.to_thread(memory_client.get_all, user_id=uid)
             filtered_memories = []
@@ -648,34 +672,56 @@ def _read_gateway_user(request: Request) -> str:
     return ""
 
 
-@mcp_router.get("/{client_name}/sse")
-async def handle_sse_new(request: Request):
-    """SSE endpoint – user identity from gateway headers."""
-    uid = _read_gateway_user(request)
+async def _run_sse_session(request: Request, uid: str, client_name: str, pslug: str = ""):
+    """Common SSE session handler that sets all context vars."""
     user_token = user_id_var.set(uid)
-    client_name = request.path_params.get("client_name", "")
     client_token = client_name_var.set(client_name)
+    project_token = project_slug_var.set(pslug)
     try:
         async with sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
             await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
     finally:
         user_id_var.reset(user_token)
         client_name_var.reset(client_token)
+        project_slug_var.reset(project_token)
+
+
+# --- Project-scoped SSE routes (preferred) ---
+
+@mcp_router.get("/p/{project_slug}/{client_name}/sse")
+async def handle_sse_project(request: Request):
+    """Project-scoped SSE endpoint – user identity from gateway headers."""
+    uid = _read_gateway_user(request)
+    client_name = request.path_params.get("client_name", "")
+    pslug = request.path_params.get("project_slug", "")
+    await _run_sse_session(request, uid, client_name, pslug)
+
+
+@mcp_router.get("/p/{project_slug}/{client_name}/sse/{user_id}")
+async def handle_sse_project_compat(request: Request):
+    """Project-scoped SSE endpoint with user_id in path (backward compat)."""
+    uid = _read_gateway_user(request)
+    client_name = request.path_params.get("client_name", "")
+    pslug = request.path_params.get("project_slug", "")
+    await _run_sse_session(request, uid, client_name, pslug)
+
+
+# --- Legacy routes (no project context, fall back to default project) ---
+
+@mcp_router.get("/{client_name}/sse")
+async def handle_sse_new(request: Request):
+    """SSE endpoint – user identity from gateway headers, no project context."""
+    uid = _read_gateway_user(request)
+    client_name = request.path_params.get("client_name", "")
+    await _run_sse_session(request, uid, client_name)
 
 
 @mcp_router.get("/{client_name}/sse/{user_id}")
 async def handle_sse_compat(request: Request):
     """Backward-compatible SSE endpoint with user_id in path."""
     uid = _read_gateway_user(request)
-    user_token = user_id_var.set(uid)
     client_name = request.path_params.get("client_name", "")
-    client_token = client_name_var.set(client_name)
-    try:
-        async with sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
-            await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
-    finally:
-        user_id_var.reset(user_token)
-        client_name_var.reset(client_token)
+    await _run_sse_session(request, uid, client_name)
 
 
 @mcp_router.post("/messages/")
