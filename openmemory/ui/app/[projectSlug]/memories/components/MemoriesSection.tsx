@@ -99,12 +99,12 @@ export function MemoriesSection() {
         {memories.length > 0 ? (
           <>
             <MemoryTable />
-            <div className="flex items-center justify-between mt-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between mt-4 gap-3">
               <PageSizeSelector
                 pageSize={itemsPerPage}
                 onPageSizeChange={handlePageSizeChange}
               />
-              <div className="text-sm text-zinc-500 mr-2">
+              <div className="text-sm text-zinc-500 whitespace-nowrap">
                 Showing {(currentPage - 1) * itemsPerPage + 1} to{" "}
                 {Math.min(currentPage * itemsPerPage, totalItems)} of{" "}
                 {totalItems} memories

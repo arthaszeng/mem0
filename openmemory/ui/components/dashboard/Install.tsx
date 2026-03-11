@@ -105,14 +105,14 @@ export const Install = () => {
       </div>
 
       <Tabs defaultValue="claude" className="w-full">
-        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-0 p-0 grid grid-cols-9">
+        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-0 p-0 flex flex-wrap sm:flex-nowrap overflow-x-auto">
           {allTabs.map(({ key, label, icon }) => (
             <TabsTrigger
               key={key}
               value={key}
-              className={`flex-1 px-0 pb-2 rounded-none ${getColorGradient(
+              className={`flex-shrink-0 px-3 pb-2 rounded-none ${getColorGradient(
                 key
-              )} data-[state=active]:border-b-2 data-[state=active]:shadow-none text-zinc-400 data-[state=active]:text-white flex items-center justify-center gap-2 text-sm`}
+              )} data-[state=active]:border-b-2 data-[state=active]:shadow-none text-zinc-400 data-[state=active]:text-white flex items-center justify-center gap-1.5 text-sm whitespace-nowrap`}
             >
               {icon.startsWith("/") ? (
                 <div>

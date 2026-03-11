@@ -18,25 +18,25 @@ export function MemoryTableSkeleton() {
               <div className="h-4 w-4 rounded bg-zinc-700/50 animate-pulse" />
             </TableHead>
             <TableHead className="border-zinc-700">
-              <div className="flex items-center min-w-[600px]">
+              <div className="flex items-center min-w-[300px]">
                 <HiMiniRectangleStack className="mr-1" />
                 Memory
               </div>
             </TableHead>
             <TableHead className="border-zinc-700">
-              <div className="flex items-center">
+              <div className="flex items-center whitespace-nowrap">
                 <PiSwatches className="mr-1" size={15} />
                 Categories
               </div>
             </TableHead>
-            <TableHead className="w-[140px] border-zinc-700">
-              <div className="flex items-center">
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <GoPackage className="mr-1" />
                 Source App
               </div>
             </TableHead>
-            <TableHead className="w-[140px] border-zinc-700">
-              <div className="flex items-center w-full justify-center">
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <CiCalendar className="mr-1" size={16} />
                 Created On
               </div>
@@ -63,10 +63,10 @@ export function MemoryTableSkeleton() {
                   <div className="h-5 w-16 bg-zinc-800 rounded-full" />
                 </div>
               </TableCell>
-              <TableCell className="w-[140px]">
+              <TableCell>
                 <div className="h-6 w-24 mx-auto bg-zinc-800 rounded" />
               </TableCell>
-              <TableCell className="w-[140px]">
+              <TableCell>
                 <div className="h-4 w-20 mx-auto bg-zinc-800 rounded" />
               </TableCell>
               <TableCell>

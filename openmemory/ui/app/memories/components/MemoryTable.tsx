@@ -129,37 +129,37 @@ export function MemoryTable() {
               />
             </TableHead>
             <TableHead className="border-zinc-700">
-              <div className="flex items-center min-w-[600px]">
+              <div className="flex items-center min-w-[300px]">
                 <HiMiniRectangleStack className="mr-1" />
                 Memory
               </div>
             </TableHead>
             <TableHead className="border-zinc-700">
-              <div className="flex items-center">
+              <div className="flex items-center whitespace-nowrap">
                 <PiSwatches className="mr-1" size={15} />
                 Categories
               </div>
             </TableHead>
-            <TableHead className="w-[140px] border-zinc-700">
-              <div className="flex items-center">
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <TbWorldSearch className="mr-1" size={15} />
                 Domain
               </div>
             </TableHead>
-            <TableHead className="w-[120px] border-zinc-700">
-              <div className="flex items-center">
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <FiUser className="mr-1" size={14} />
                 Created By
               </div>
             </TableHead>
-            <TableHead className="w-[140px] border-zinc-700">
-              <div className="flex items-center">
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <GoPackage className="mr-1" />
                 Source App
               </div>
             </TableHead>
-            <TableHead className="w-[140px] border-zinc-700">
-              <div className="flex items-center w-full justify-center">
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <CiCalendar className="mr-1" size={16} />
                 Created On
               </div>
@@ -238,7 +238,7 @@ export function MemoryTable() {
                   />
                 </div>
               </TableCell>
-              <TableCell className="w-[140px] text-center">
+              <TableCell className="text-center whitespace-nowrap">
                 <span className={`text-xs px-2 py-0.5 rounded-full border ${
                   memory.state === "paused" || memory.state === "archived"
                     ? "border-zinc-700 text-zinc-500"
@@ -247,15 +247,15 @@ export function MemoryTable() {
                   {memory.domain}
                 </span>
               </TableCell>
-              <TableCell className="w-[120px]">
+              <TableCell className="whitespace-nowrap">
                 <span className="text-sm text-zinc-300">
                   {memory.created_by || "-"}
                 </span>
               </TableCell>
-              <TableCell className="w-[140px] text-center">
+              <TableCell className="text-center whitespace-nowrap">
                 <SourceApp source={memory.app_name} />
               </TableCell>
-              <TableCell className="w-[140px] text-center">
+              <TableCell className="text-center whitespace-nowrap">
                 {formatDate(memory.created_at)}
               </TableCell>
               <TableCell className="text-right flex justify-center">

@@ -1,5 +1,6 @@
 const MCP_SERVER = "http://47.108.141.20/concierge-mcp";
 const CONCIERGE_URL = "https://concierge.sanofi.com/";
+const API_KEY = "om_r7fnXN4jBsjyhTeEcaFvOMU1_tc_46CBMeMX03wH0qM";
 
 const dotServer = document.getElementById("dotServer");
 const dotLogin = document.getElementById("dotLogin");
@@ -22,6 +23,7 @@ async function checkMcpServer() {
   try {
     const resp = await fetch(`${MCP_SERVER}/auth/status`, {
       signal: AbortSignal.timeout(3000),
+      headers: { "Authorization": `Bearer ${API_KEY}` },
     });
     if (!resp.ok) return { online: true, synced: false };
     const data = await resp.json();
@@ -47,7 +49,10 @@ function getConciergeToken() {
 async function syncToMcp(accessToken) {
   const resp = await fetch(`${MCP_SERVER}/auth/cookies`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${API_KEY}`,
+    },
     body: JSON.stringify({ access_token: accessToken }),
   });
   if (!resp.ok) throw new Error(`Server returned ${resp.status}`);

@@ -12,7 +12,7 @@ import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import Image from "next/image";
 import { useStats } from "@/hooks/useStats";
 import { useAppsApi } from "@/hooks/useAppsApi";
-import { LogOut, FolderKanban, ChevronDown, ShieldCheck, UserPlus, Copy, X, Check, Loader2 } from "lucide-react";
+import { LogOut, FolderKanban, ChevronDown, ShieldCheck, UserPlus, Copy, X, Check, Loader2, Menu } from "lucide-react";
 import { toast } from "sonner";
 import { useConfig } from "@/hooks/useConfig";
 import { deleteCookie, getCookie, TOKEN_COOKIE, decodeJwtPayload } from "@/lib/auth";
@@ -254,14 +254,164 @@ export function Navbar() {
   const inactiveClass = "text-zinc-300";
 
   const isLoginPage = pathname === "/login" || pathname === "/change-password";
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const navLinks = (
+    <>
+      {projectSlug && (
+        <>
+          <Link href={pHref("")} onClick={() => setMobileMenuOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${isActive(pHref("")) && !pathname.includes("/memories") && !pathname.includes("/apps") ? activeClass : inactiveClass}`}
+            >
+              <HiHome /> Dashboard
+            </Button>
+          </Link>
+          <Link href={pHref("/memories")} onClick={() => setMobileMenuOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${isActive(pHref("/memories")) ? activeClass : inactiveClass}`}
+            >
+              <HiMiniRectangleStack /> Memories
+            </Button>
+          </Link>
+          <Link href={pHref("/apps")} onClick={() => setMobileMenuOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`flex items-center gap-2 border-none ${isActive(pHref("/apps")) ? activeClass : inactiveClass}`}
+            >
+              <RiApps2AddFill /> Apps
+            </Button>
+          </Link>
+        </>
+      )}
+      {isSuperadmin && (
+        <Link href="/settings" onClick={() => setMobileMenuOpen(false)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className={`flex items-center gap-2 border-none ${pathname.startsWith("/settings") ? activeClass : inactiveClass}`}
+          >
+            <ShieldCheck className="h-4 w-4" /> Admin Settings
+          </Button>
+        </Link>
+      )}
+    </>
+  );
+
+  const actionButtons = (
+    <>
+      <Button
+        onClick={handleRefresh}
+        variant="outline"
+        size="sm"
+        className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
+        disabled={refreshing}
+      >
+        {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FiRefreshCcw className="transition-transform duration-300 group-hover:rotate-180" />}
+        <span className="hidden sm:inline">Refresh</span>
+      </Button>
+      {canInvite && projectSlug && (
+        <Dialog open={inviteOpen} onOpenChange={(open) => { setInviteOpen(open); if (!open) { setCreatedLink(null); setCopied(false); } }}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="flex items-center gap-2 border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
+              <UserPlus className="h-4 w-4" /> <span className="hidden sm:inline">Invite</span>
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="bg-zinc-900 border-zinc-700 max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader><DialogTitle>Invite to {currentProject?.name || projectSlug}</DialogTitle></DialogHeader>
+
+            <div className="space-y-4">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <Label className="text-xs text-zinc-400">Role</Label>
+                  <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1">
+                    <option value="read_only">Read Only</option>
+                    <option value="read_write">Read / Write</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div className="w-24">
+                  <Label className="text-xs text-zinc-400">Expires (days)</Label>
+                  <input type="number" min={1} max={365} value={inviteExpiry} onChange={(e) => setInviteExpiry(Number(e.target.value))} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1" />
+                </div>
+                <Button size="sm" onClick={handleCreateInvite} disabled={inviteLoading}>{inviteLoading ? "Creating..." : "Create Link"}</Button>
+              </div>
+
+              {createdLink && (
+                <div className="flex items-center gap-2 rounded-md bg-zinc-800 border border-zinc-700 p-2">
+                  <input readOnly value={createdLink} className="flex-1 bg-transparent text-xs text-zinc-200 outline-none" />
+                  <Button size="sm" variant="ghost" onClick={handleCopyLink} className="h-7 w-7 p-0">
+                    {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              )}
+
+              <div>
+                <h4 className="text-sm font-medium text-zinc-300 mb-2">Team Members ({members.length})</h4>
+                {members.length === 0 ? <p className="text-xs text-zinc-500">No members yet.</p> : (
+                  <div className="space-y-1">
+                    {members.map((m) => (
+                      <div key={m.id} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-1.5">
+                        <span className="text-sm text-white">{m.username}</span>
+                        <span className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300">{m.role}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-zinc-300 mb-2">Invite History ({invites.length})</h4>
+                {invites.length === 0 ? <p className="text-xs text-zinc-500">No invites yet.</p> : (
+                  <div className="space-y-1">
+                    {invites.map((inv) => (
+                      <div key={inv.id} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-1.5">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs text-zinc-400">
+                            {`${inv.role} \u00B7 ${inv.status}`}
+                            {inv.accepted_by && ` by ${inv.accepted_by}`}
+                            {inv.created_at && ` \u00B7 ${new Date(inv.created_at).toLocaleDateString()}`}
+                          </span>
+                        </div>
+                        {inv.status === "pending" && (
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-400 hover:text-red-300" onClick={() => handleRevokeInvite(inv.token)}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+      <CreateMemoryDialog />
+      <Button
+        onClick={handleLogout}
+        variant="outline"
+        size="sm"
+        className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white"
+      >
+        <LogOut className="h-4 w-4" />
+      </Button>
+    </>
+  );
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/60">
-      <div className="container flex h-14 items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="container flex h-14 items-center justify-between gap-2">
+        {/* Left: Logo + Project Selector */}
+        <div className="flex items-center gap-3 flex-shrink-0">
           <Link href="/" className="flex items-center gap-2">
             <Image src={`${basePath}/logo.svg`} alt="OpenMemory" width={26} height={26} />
-            <span className="text-xl font-medium">OpenMemory</span>
+            <span className="text-xl font-medium hidden sm:inline">OpenMemory</span>
           </Link>
 
           {!isLoginPage && projectSlug && projects.length > 0 && (
@@ -269,7 +419,7 @@ export function Navbar() {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1 border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 ml-2">
                   <FolderKanban className="h-3.5 w-3.5" />
-                  {currentProject?.name || projectSlug}
+                  <span className="max-w-[100px] truncate">{currentProject?.name || projectSlug}</span>
                   <ChevronDown className="h-3 w-3 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
@@ -288,154 +438,44 @@ export function Navbar() {
           )}
         </div>
 
+        {/* Center: Nav Links - hidden on small screens */}
         {!isLoginPage && (
-          <div className="flex items-center gap-2">
-            {projectSlug && (
-              <>
-                <Link href={pHref("")}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`flex items-center gap-2 border-none ${isActive(pHref("")) && !pathname.includes("/memories") && !pathname.includes("/apps") ? activeClass : inactiveClass}`}
-                  >
-                    <HiHome /> Dashboard
-                  </Button>
-                </Link>
-                <Link href={pHref("/memories")}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`flex items-center gap-2 border-none ${isActive(pHref("/memories")) ? activeClass : inactiveClass}`}
-                  >
-                    <HiMiniRectangleStack /> Memories
-                  </Button>
-                </Link>
-                <Link href={pHref("/apps")}>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`flex items-center gap-2 border-none ${isActive(pHref("/apps")) ? activeClass : inactiveClass}`}
-                  >
-                    <RiApps2AddFill /> Apps
-                  </Button>
-                </Link>
-              </>
-            )}
-            {isSuperadmin && (
-              <Link href="/settings">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={`flex items-center gap-2 border-none ${pathname.startsWith("/settings") ? activeClass : inactiveClass}`}
-                >
-                  <ShieldCheck className="h-4 w-4" /> Admin Settings
-                </Button>
-              </Link>
-            )}
+          <div className="hidden xl:flex items-center gap-2">
+            {navLinks}
           </div>
         )}
 
+        {/* Right: Action Buttons + Mobile Menu Toggle */}
         {!isLoginPage && (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="hidden xl:flex items-center gap-2">
+              {actionButtons}
+            </div>
             <Button
-              onClick={handleRefresh}
               variant="outline"
               size="sm"
-              className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
-              disabled={refreshing}
+              className="xl:hidden border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FiRefreshCcw className="transition-transform duration-300 group-hover:rotate-180" />}
-              Refresh
-            </Button>
-            {canInvite && projectSlug && (
-              <Dialog open={inviteOpen} onOpenChange={(open) => { setInviteOpen(open); if (!open) { setCreatedLink(null); setCopied(false); } }}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="flex items-center gap-2 border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800">
-                    <UserPlus className="h-4 w-4" /> Invite
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="bg-zinc-900 border-zinc-700 max-w-lg max-h-[80vh] overflow-y-auto">
-                  <DialogHeader><DialogTitle>Invite to {currentProject?.name || projectSlug}</DialogTitle></DialogHeader>
-
-                  <div className="space-y-4">
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <Label className="text-xs text-zinc-400">Role</Label>
-                        <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1">
-                          <option value="read_only">Read Only</option>
-                          <option value="read_write">Read / Write</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </div>
-                      <div className="w-24">
-                        <Label className="text-xs text-zinc-400">Expires (days)</Label>
-                        <input type="number" min={1} max={365} value={inviteExpiry} onChange={(e) => setInviteExpiry(Number(e.target.value))} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1" />
-                      </div>
-                      <Button size="sm" onClick={handleCreateInvite} disabled={inviteLoading}>{inviteLoading ? "Creating..." : "Create Link"}</Button>
-                    </div>
-
-                    {createdLink && (
-                      <div className="flex items-center gap-2 rounded-md bg-zinc-800 border border-zinc-700 p-2">
-                        <input readOnly value={createdLink} className="flex-1 bg-transparent text-xs text-zinc-200 outline-none" />
-                        <Button size="sm" variant="ghost" onClick={handleCopyLink} className="h-7 w-7 p-0">
-                          {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
-                        </Button>
-                      </div>
-                    )}
-
-                    <div>
-                      <h4 className="text-sm font-medium text-zinc-300 mb-2">Team Members ({members.length})</h4>
-                      {members.length === 0 ? <p className="text-xs text-zinc-500">No members yet.</p> : (
-                        <div className="space-y-1">
-                          {members.map((m) => (
-                            <div key={m.id} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-1.5">
-                              <span className="text-sm text-white">{m.username}</span>
-                              <span className="text-xs px-2 py-0.5 rounded bg-zinc-700 text-zinc-300">{m.role}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <h4 className="text-sm font-medium text-zinc-300 mb-2">Invite History ({invites.length})</h4>
-                      {invites.length === 0 ? <p className="text-xs text-zinc-500">No invites yet.</p> : (
-                        <div className="space-y-1">
-                          {invites.map((inv) => (
-                            <div key={inv.id} className="flex items-center justify-between rounded bg-zinc-800/60 px-3 py-1.5">
-                              <div className="flex-1 min-w-0">
-                                <span className="text-xs text-zinc-400">
-                                  {`${inv.role} \u00B7 ${inv.status}`}
-                                  {inv.accepted_by && ` by ${inv.accepted_by}`}
-                                  {inv.created_at && ` \u00B7 ${new Date(inv.created_at).toLocaleDateString()}`}
-                                </span>
-                              </div>
-                              {inv.status === "pending" && (
-                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-400 hover:text-red-300" onClick={() => handleRevokeInvite(inv.token)}>
-                                  <X className="h-3 w-3" />
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            )}
-            <CreateMemoryDialog />
-            <Button
-              onClick={handleLogout}
-              variant="outline"
-              size="sm"
-              className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white"
-            >
-              <LogOut className="h-4 w-4" />
+              <Menu className="h-4 w-4" />
             </Button>
           </div>
         )}
       </div>
+
+      {/* Mobile/Tablet expanded menu */}
+      {!isLoginPage && mobileMenuOpen && (
+        <div className="xl:hidden border-t border-zinc-800 bg-zinc-950/98 backdrop-blur">
+          <div className="container py-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {navLinks}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
+              {actionButtons}
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

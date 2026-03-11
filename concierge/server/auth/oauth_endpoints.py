@@ -88,6 +88,11 @@ async def receive_cookies(request: Request):
     """Receive Concierge cookies from the Chrome extension.
 
     Body: { "state": "<oauth-state>", "access_token": "<jwt>" }
+
+    When called through the auth gateway (Extension popup with API key),
+    X-Auth-Username is injected and used as the cookie_store key so it
+    matches the key used during MCP tool execution.
+    Fallback to Sanofi JWT sub for the OAuth authorize page flow.
     """
     body = await request.json()
     state = body.get("state")
@@ -96,7 +101,11 @@ async def receive_cookies(request: Request):
     if not access_token:
         raise HTTPException(400, "Missing access_token")
 
-    user_id = _extract_user_id(access_token)
+    gateway_username = request.headers.get("X-Auth-Username")
+    if gateway_username:
+        user_id = gateway_username
+    else:
+        user_id = _extract_user_id(access_token)
     cookie_store.set(user_id, access_token)
 
     pending = _pending_authorizations.get(state) if state else None

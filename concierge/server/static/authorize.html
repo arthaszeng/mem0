@@ -80,7 +80,7 @@ async function detectExtension() {
 
   // Also try to get it from the server config
   try {
-    const resp = await fetch("/auth/extension-id");
+    const resp = await fetch("/concierge-mcp/auth/extension-id");
     if (resp.ok) {
       const data = await resp.json();
       if (data.extension_id) candidates.push(data.extension_id);
@@ -167,7 +167,7 @@ syncBtn.addEventListener("click", async () => {
   statusEl.textContent = "Sending cookies to MCP server…";
 
   try {
-    const resp = await fetch("/auth/cookies", {
+    const resp = await fetch("/concierge-mcp/auth/cookies", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ state: oauthState, access_token: result.access_token }),

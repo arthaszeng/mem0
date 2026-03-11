@@ -47,8 +47,8 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
         <ArrowLeft className="h-4 w-4 mr-2" />
         Back to Memories
       </Button>
-      <div className="flex gap-4 w-full">
-        <div className="rounded-lg w-2/3 border h-fit pb-2 border-zinc-800 bg-zinc-900 overflow-hidden">
+      <div className="flex flex-col lg:flex-row gap-4 w-full">
+        <div className="rounded-lg w-full lg:w-2/3 border h-fit pb-2 border-zinc-800 bg-zinc-900 overflow-hidden">
           <div className="">
             <div className="flex px-6 py-3 justify-between items-center mb-6 bg-zinc-800 border-b border-zinc-800">
               <div className="flex items-center gap-2">
@@ -102,7 +102,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                       }
                     />
                   </div>
-                  <div className="flex items-center gap-2 min-w-[300px] justify-end">
+                  <div className="flex items-center gap-2 justify-end flex-shrink-0">
                     {memory?.created_by && (
                       <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
                         <span className="text-sm text-zinc-400">User:</span>
@@ -143,7 +143,7 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
             </div>
           </div>
         </div>
-        <div className="w-1/3 flex flex-col gap-4">
+        <div className="w-full lg:w-1/3 flex flex-col gap-4">
           <AccessLog memoryId={memory?.id || ""} />
           <RelatedMemories memoryId={memory?.id || ""} />
         </div>

@@ -100,8 +100,12 @@ async def get_extension_id():
 
 
 @app.get(f"{_PREFIX}/auth/status")
-async def auth_status():
-    """Check if a valid Concierge session is available in the cookie store."""
+async def auth_status(request: Request):
+    """Check if a valid Concierge session is available for the current user."""
+    username = request.headers.get("X-Auth-Username")
+    if username:
+        token = cookie_store.get(username)
+        return {"connected": token is not None, "user": username}
     token = cookie_store.get_any()
     return {"connected": token is not None}
 
@@ -125,8 +129,7 @@ async def set_token(request: Request):
 @app.get(f"{_PREFIX}/sse")
 async def handle_sse(request: Request):
     """Main SSE endpoint for MCP connections."""
-    auth_header = request.headers.get("Authorization", "")
-    uid = _authenticate(auth_header)
+    uid = _authenticate_request(request)
     token = user_id_var.set(uid)
 
     try:
@@ -146,8 +149,7 @@ async def handle_sse(request: Request):
 
 @app.post(f"{_PREFIX}/msg/")
 async def handle_post_message(request: Request):
-    auth_header = request.headers.get("Authorization", "")
-    uid = _authenticate(auth_header)
+    uid = _authenticate_request(request)
     token = user_id_var.set(uid)
 
     try:
@@ -174,8 +176,13 @@ def _is_dev_mode() -> bool:
     return os.getenv("JWT_SECRET", "dev-secret-change-me") in _DEV_SECRETS
 
 
-def _authenticate(auth_header: str) -> str:
-    """Extract and verify user_id from Bearer token, or allow anonymous for dev."""
+def _authenticate_request(request: Request) -> str:
+    """Extract user_id from gateway headers (preferred) or Bearer token fallback."""
+    gateway_username = request.headers.get("X-Auth-Username")
+    if gateway_username:
+        return gateway_username
+
+    auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         payload = jwt_manager.verify_access_token(token)

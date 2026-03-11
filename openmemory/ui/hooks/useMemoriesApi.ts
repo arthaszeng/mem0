@@ -165,6 +165,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   }, [dispatch, projectSlug]);
 
   const createMemory = async (text: string): Promise<void> => {
+    setIsLoading(true);
+    setError(null);
     try {
       await api.post<ApiMemoryItem>(`/api/v1/memories/`, {
         text,
@@ -172,6 +174,7 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         app: "openmemory",
         project_slug: projectSlug || undefined,
       });
+      setIsLoading(false);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to create memory';
       setError(errorMessage);
@@ -181,11 +184,14 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
   };
 
   const deleteMemories = async (memory_ids: string[]) => {
+    setIsLoading(true);
+    setError(null);
     try {
       await api.delete(`/api/v1/memories/`, {
         data: { memory_ids, project_slug: projectSlug || undefined }
       });
       dispatch(setMemoriesSuccess(memories.filter((memory: Memory) => !memory_ids.includes(memory.id))));
+      setIsLoading(false);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to delete memories';
       setError(errorMessage);
