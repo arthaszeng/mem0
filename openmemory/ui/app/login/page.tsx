@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,6 @@ import { TOKEN_COOKIE, USER_COOKIE, setCookie, decodeJwtPayload } from "@/lib/au
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 export default function LoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect");
   const [username, setUsername] = useState("");
@@ -34,6 +33,7 @@ export default function LoginPage() {
       if (!res.ok) {
         const data = await res.json();
         setError(data.detail || data.error || "Login failed");
+        setLoading(false);
         return;
       }
 
@@ -44,15 +44,12 @@ export default function LoginPage() {
       setCookie(TOKEN_COOKIE, data.access_token, maxAge);
       setCookie(USER_COOKIE, payload?.username || username, maxAge);
 
-      if (data.must_change_password) {
-        router.push("/change-password");
-      } else {
-        router.push(redirectUrl || "/");
-      }
-      router.refresh();
+      const target = data.must_change_password
+        ? `${basePath}/change-password`
+        : redirectUrl || `${basePath}/`;
+      window.location.href = target;
     } catch {
       setError("Network error");
-    } finally {
       setLoading(false);
     }
   };
@@ -109,6 +106,7 @@ export default function LoginPage() {
 
           <Button
             type="submit"
+            disabled={loading}
             className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in"}
