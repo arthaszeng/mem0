@@ -1,0 +1,174 @@
+/* ================================================================
+   Release Tree — animations, glow effects, gradient line
+   ================================================================ */
+
+/* --- Node glow by status --- */
+
+.rt-node-completed {
+  background: #10b981;
+  box-shadow:
+    0 0 6px 2px rgba(16, 185, 129, 0.5),
+    0 0 20px 4px rgba(16, 185, 129, 0.15);
+}
+
+.rt-node-in_progress {
+  background: hsl(260, 94%, 59%);
+  animation: rtPulseGlow 2s ease-in-out infinite;
+}
+
+.rt-node-upcoming {
+  background: transparent;
+  border: 2px dashed #52525b;
+}
+
+@keyframes rtPulseGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 6px 2px rgba(124, 58, 237, 0.6),
+      0 0 20px 6px rgba(124, 58, 237, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 10px 4px rgba(124, 58, 237, 0.8),
+      0 0 30px 10px rgba(124, 58, 237, 0.35);
+  }
+}
+
+/* --- Card border accent --- */
+
+.rt-card-completed {
+  border-left: 3px solid #10b981;
+}
+.rt-card-completed:hover {
+  border-left-color: #34d399;
+  box-shadow: 0 0 20px 2px rgba(16, 185, 129, 0.08);
+}
+
+.rt-card-in_progress {
+  border-left: 3px solid hsl(260, 94%, 59%);
+  animation: rtCardBreath 3s ease-in-out infinite;
+}
+.rt-card-in_progress:hover {
+  box-shadow: 0 0 24px 2px rgba(124, 58, 237, 0.12);
+}
+
+.rt-card-upcoming {
+  border-left: 3px solid #3f3f46;
+  opacity: 0.55;
+}
+.rt-card-upcoming:hover {
+  opacity: 0.8;
+}
+
+@keyframes rtCardBreath {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+  50%      { box-shadow: 0 0 16px 2px rgba(124, 58, 237, 0.08); }
+}
+
+/* --- Staggered entrance animation --- */
+
+.rt-item-enter {
+  opacity: 0;
+  transform: translateX(-12px);
+  animation: rtSlideIn 0.45s ease-out forwards;
+}
+
+@keyframes rtSlideIn {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* dynamic stagger delays set via inline style */
+
+/* --- Timeline connector line gradient --- */
+
+.rt-line-completed {
+  background: linear-gradient(to bottom, #10b981, #10b981);
+}
+.rt-line-in_progress {
+  background: linear-gradient(to bottom, hsl(260, 94%, 59%), hsl(260, 94%, 59%));
+}
+.rt-line-upcoming {
+  background: repeating-linear-gradient(
+    to bottom,
+    #3f3f46 0px,
+    #3f3f46 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+/* --- Scroll fade masks --- */
+
+.rt-scroll-container {
+  position: relative;
+}
+
+.rt-scroll-container::before,
+.rt-scroll-container::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
+  pointer-events: none;
+  z-index: 10;
+}
+.rt-scroll-container::before {
+  top: 0;
+  background: linear-gradient(to bottom, rgb(9, 9, 11), transparent);
+}
+.rt-scroll-container::after {
+  bottom: 0;
+  background: linear-gradient(to top, rgb(9, 9, 11), transparent);
+}
+
+/* --- Feature chip --- */
+
+.rt-feature-chip {
+  transition: all 0.2s ease;
+}
+.rt-feature-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* --- Collapsible content --- */
+
+.rt-collapsible-content {
+  overflow: hidden;
+  animation: rtExpand 0.25s ease-out;
+}
+
+@keyframes rtExpand {
+  from { opacity: 0; max-height: 0; }
+  to   { opacity: 1; max-height: 400px; }
+}
+
+/* --- Version badge shine --- */
+
+.rt-version-badge {
+  position: relative;
+  overflow: hidden;
+}
+.rt-version-badge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.08),
+    transparent
+  );
+  animation: rtShine 4s ease-in-out infinite;
+}
+
+@keyframes rtShine {
+  0%, 100% { left: -100%; }
+  50%      { left: 100%; }
+}

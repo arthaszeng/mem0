@@ -1,0 +1,134 @@
+# OpenMemory Release Roadmap
+
+<!-- 
+  格式说明：
+  - 每个版本用 ## 开头，格式为：## version | title | status | date | icon
+  - status: completed / in_progress / upcoming
+  - icon: lucide 图标名 (kebab-case)，如 layers, shield, sparkles, globe 等
+  - 版本描述紧跟在 ## 下一行
+  - Feature 用 checkbox 表示状态：[x] = completed, [-] = in_progress, [ ] = upcoming
+  - Feature 格式：- [x] **名称** — 描述
+  
+  编辑此文件后重新构建 UI 即可自动更新 Dashboard 的 Release Tree。
+-->
+
+## v0.1 | Core Foundation | completed | 2026-01 | layers
+
+记忆系统基础架构：双存储引擎 + 语义搜索 + MCP Server
+
+- [x] **Qdrant + SQLite 双存储** — Qdrant 存向量用于语义搜索，SQLite 存元数据用于管理和过滤
+- [x] **CRUD + 语义搜索** — 完整的记忆增删改查 REST API，基于 embedding 余弦相似度的语义搜索
+- [x] **MCP Server (SSE)** — SSE 传输协议的 MCP Server，支持 Cursor / Claude Desktop / Cline 等客户端直接接入
+- [x] **Custom Instructions** — DB 持久化 + UI 编辑面板，自定义 Fact Extraction 和 Categorization 规则
+- [x] **导出 / 导入** — ZIP 格式完整备份（SQLite 数据 + 记忆 JSON），支持跨实例数据迁移
+- [x] **Next.js 管理界面** — Dashboard + 记忆表格 + 详情页 + 设置页，Tailwind + Radix UI 暗色主题
+
+## v0.2 | Cross-SDK Interop | completed | 2026-02 | link-2
+
+JS/Python 双 SDK 互通 — OpenClaw 插件实现跨客户端记忆共享
+
+- [x] **OpenClaw mem0 插件** — 基于 mem0ai JS SDK 的 OpenClaw 插件，实现 auto-capture 和 auto-recall
+- [x] **Payload 字段统一** — JS SDK 和 Python SDK 统一为 snake_case（user_id, created_at），解决跨 SDK 数据不互通
+- [x] **SQLite 自动注册** — JS SDK 写入 Qdrant 后自动注册到 SQLite 元数据库，UI 和 API 均可管理
+- [x] **双向数据互通** — Python SDK 写的记忆 JS 能读，JS 写的记忆 Python 能查，完全双向兼容
+
+## v0.3 | Smart Classification | completed | 2026-02 | sparkles
+
+LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
+
+- [x] **Domain 智能识别** — LLM 驱动的 domain 识别 + 关键词快速匹配双通道，自动归类到注册域
+- [x] **Category 自动标注** — LLM 根据内容自动标注 category，支持字符串→列表解析和域名兜底
+- [x] **后台异步分类** — MCP 写入后台线程触发分类，不阻塞主请求，提升响应速度
+- [x] **Backfill 批量回填** — backfill-categories 端点一次性回填 179 条无分类历史记忆
+- [x] **敏感信息脱敏** — 两阶段检测：关键词快筛 + 正则脱敏，覆盖 API Key / 连接串 / PEM / Token 等
+- [x] **循环调用 Bug 修复** — 修复分类过程中触发二次写入导致的无限循环问题
+
+## v0.4 | Cloud Deployment | completed | 2026-03 | globe
+
+从本地到云端 — 阿里云部署 + LLM 升级 + 向量库扩容
+
+- [x] **阿里云 Docker 部署** — Docker Compose 一键部署到阿里云 ECS（2vCPU/2GB），包含 Qdrant / API / UI / Nginx
+- [x] **Nginx 反向代理** — 统一入口网关，路由 /memory-mcp/ 和 /concierge-mcp/ 到不同后端服务
+- [x] **SSL / HTTPS** — arthaszeng.top 域名 + Let's Encrypt 证书，全链路 HTTPS 加密
+- [x] **LLM 升级 gpt-4o-mini** — 从本地 Ollama qwen2.5:7b 迁移到 gpt-4o-mini，分类和提取质量大幅提升
+- [x] **Embedding 升级 1536d** — 从 nomic-embed-text (768d) 升级到 text-embedding-3-small (1536d)，搜索精度提升
+- [x] **Qdrant Collection 迁移** — openmemory_768 → openmemory (1536d)，全量数据重建向量索引
+
+## v0.5 | Multi-Client Hub | completed | 2026-03 | messages-square
+
+一套记忆，多端共享 — MCP Prompts + ChatGPT + Concierge Agent
+
+- [x] **6 个 MCP Prompts** — recall / briefing / project-context / who-am-i / review-memories / custom-instructions
+- [x] **ChatGPT Custom GPT** — OpenAPI Schema 定义 8 个 Actions，ChatGPT 直接读写 OpenMemory
+- [x] **Concierge LangGraph Agent** — 独立的 AI 代理服务，通过 LangGraph 编排多步对话和记忆操作
+- [x] **Chrome 扩展** — Concierge 浏览器扩展，popup 界面连接云端 MCP，随时随地对话
+- [x] **ICP Tunnel 绕行** — 阿里云 80/443 端口被 ICP 拦截，通过 Tunnel 方案让 ChatGPT Actions 正常访问
+
+## v0.6 | Multi-User Auth | completed | 2026-03 | shield
+
+多用户认证体系 + 项目级权限隔离 + 安全加固
+
+- [x] **OAuth2 + Session** — 完整的 OAuth2 认证流程 + Session 会话管理，支持多客户端登录
+- [x] **Nginx Auth 网关** — Nginx 注入 X-Auth-User / X-Auth-Project 头部，后端透明鉴权
+- [x] **项目级记忆隔离** — 每个项目独立的 Qdrant namespace + SQLite 过滤，记忆完全隔离
+- [x] **4 级角色系统** — Owner(3) > Admin(2) > ReadWrite(1) > ReadOnly(0)，细粒度权限控制
+- [x] **项目邀请系统** — 可分享链接邀请用户加入项目，支持指定角色和过期时间
+- [x] **数据隔离安全修复** — 修复 archive 无认证 / delete 无所有权校验 / global_pause 影响全局 三个安全漏洞
+- [x] **Chrome 扩展 OAuth** — Concierge 浏览器扩展集成 OAuth 认证流程，支持多用户切换
+
+## v0.7 | Memory Quality | in_progress | 进行中 | brain
+
+记忆质量升级 — 更精准的提取、更智能的过滤
+
+- [ ] **Fact Extraction 增强** — 丰富 few-shot 正负例，过滤闲聊 / 推测 / 调试输出
+- [ ] **Confidence Threshold** — 置信度门控，模糊表述自动标记或丢弃
+- [ ] **Per-Call Instructions** — 支持每次请求覆盖全局提取规则，灵活适配不同场景
+
+## v0.8 | Memory Lifecycle | upcoming | 计划中 | clock
+
+记忆不再永久堆积 — 自动过期、智能归档、类型分层
+
+- [ ] **TTL 自动过期** — 支持 expiration_date，定时任务自动清理过期记忆
+- [ ] **ArchivePolicy 自动化** — 按 app / category / domain 设置差异化归档策略
+- [ ] **Memory Type 分层** — session / preference / fact / episodic 四类标签，搜索按类型过滤
+
+## v0.9 | Advanced Retrieval | upcoming | 计划中 | search
+
+从「能搜到」到「搜得准」— 混合检索 + 重排序
+
+- [ ] **Keyword + Vector 混合检索** — Qdrant Full-Text Index + 向量搜索双通道，合并去重排序
+- [ ] **Reranking 重排序** — Jina / Cohere Reranker 对 top-20 候选重排，精准返回 top-5
+- [ ] **Memory Filtering** — LLM 判断搜索结果与查询的高度相关性，过滤语义漂移
+- [ ] **MCP Search 增强** — search_memory 支持 limit / keyword_search / rerank / categories 参数
+
+## v1.0 | Graph Memory | upcoming | 计划中 | git-branch
+
+从扁平记忆到结构化知识网络 — 实体关系 + 多跳推理
+
+- [ ] **Kuzu Graph Store** — 嵌入式图数据库集成，零运维，与 SQLite 哲学一致
+- [ ] **实体关系提取** — LLM 自动提取人名/项目/技术/地点及其关系
+- [ ] **Graph-Enhanced Search** — 向量搜索 + 图遍历，返回关联实体和关系链
+- [ ] **知识图谱可视化** — 力导向图 UI，节点按类型着色，点击展开关联记忆
+
+## v1.1 | Entity Scoping | upcoming | 计划中 | layers
+
+更细粒度的记忆隔离 — 会话级 + AI 角色级
+
+- [ ] **run_id + agent_id** — Memory 模型新增字段，支持会话和 AI 角色级记忆隔离
+- [ ] **Agent Memory** — 每个 AI 角色独立的 Custom Instructions 和个性记忆
+
+## v1.2 | MCP Complete | upcoming | 计划中 | wrench
+
+MCP 工具集追平 REST API — 更新、归档、结构化导出
+
+- [ ] **MCP Update Tool** — update_memory 工具：更新 Qdrant + SQLite + 触发重分类
+- [ ] **Archive / Restore Tools** — MCP 端批量归档和恢复
+- [ ] **Structured Export** — JSON Schema 驱动的结构化导出，LLM 编译用户画像
+
+## v1.3 | Intelligence | upcoming | 远期 | zap
+
+记忆系统从被动存储走向主动智能
+
+- [ ] **Memory Consolidation** — 定期扫描相似记忆，LLM 自动合并冗余
+- [ ] **Contradiction Detection** — 写入时检测矛盾，自动以最新为准更新旧记忆
+- [ ] **Memory Insights** — 用户画像摘要 + 主题趋势分析 + 知识覆盖度

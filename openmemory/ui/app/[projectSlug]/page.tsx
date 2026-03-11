@@ -2,8 +2,7 @@
 
 import { Install } from "@/components/dashboard/Install";
 import Stats from "@/components/dashboard/Stats";
-import { MemoryFilters } from "@/app/[projectSlug]/memories/components/MemoryFilters";
-import { MemoriesSection } from "@/app/[projectSlug]/memories/components/MemoriesSection";
+import { ReleaseTree } from "@/components/dashboard/ReleaseTree";
 import "@/styles/animation.css";
 
 export default function ProjectDashboardPage() {
@@ -19,13 +18,8 @@ export default function ProjectDashboardPage() {
               <Stats />
             </div>
           </div>
-          <div>
-            <div className="animate-fade-slide-down delay-2">
-              <MemoryFilters />
-            </div>
-            <div className="animate-fade-slide-down delay-3">
-              <MemoriesSection />
-            </div>
+          <div className="animate-fade-slide-down delay-2">
+            <ReleaseTree />
           </div>
         </div>
       </div>
