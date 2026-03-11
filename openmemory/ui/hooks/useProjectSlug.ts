@@ -1,6 +1,6 @@
 import { usePathname } from "next/navigation";
 
-const GLOBAL_ROUTES = ["/login", "/change-password", "/settings", "/invite"];
+const GLOBAL_ROUTES = ["/login", "/change-password", "/settings", "/invite", "/admin", "/api-keys"];
 
 export function useProjectSlug(): string {
   const pathname = usePathname();

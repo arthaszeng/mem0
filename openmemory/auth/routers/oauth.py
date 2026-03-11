@@ -14,6 +14,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel as _BaseModel
 from sqlalchemy.orm import Session
 
 from config import (
@@ -101,7 +102,9 @@ def authorize(
         raise HTTPException(400, f"Unknown client_id: {client_id}")
 
     allowed_uris = json.loads(client.redirect_uris)
-    if allowed_uris and redirect_uri not in allowed_uris:
+    if not allowed_uris:
+        raise HTTPException(400, "No redirect_uris configured for this client")
+    if redirect_uri not in allowed_uris:
         raise HTTPException(400, "redirect_uri not registered for this client")
 
     return templates.TemplateResponse(
@@ -213,6 +216,15 @@ def _handle_authorization_code(body: TokenRequest, db: Session):
     if not body.code or not body.client_id:
         raise HTTPException(400, "code and client_id required")
 
+    client = db.query(OAuthClient).filter(OAuthClient.client_id == body.client_id).first()
+    if not client:
+        raise HTTPException(400, "Unknown client_id")
+    if client.client_secret_hash:
+        if not body.client_secret:
+            raise HTTPException(400, "client_secret required for this client")
+        if not bcrypt.checkpw(body.client_secret.encode(), client.client_secret_hash.encode()):
+            raise HTTPException(400, "Invalid client_secret")
+
     code_hash = hashlib.sha256(body.code.encode()).hexdigest()
     auth_code = db.query(AuthorizationCode).filter(
         AuthorizationCode.code_hash == code_hash,
@@ -315,12 +327,15 @@ def _handle_refresh_token(body: TokenRequest, db: Session):
     }
 
 
+class RevokeTokenRequest(_BaseModel):
+    token: str
+
+
 @router.post("/token/revoke")
-def revoke_token(request: Request, db: Session = Depends(get_db)):
-    token_val = request.query_params.get("token", "")
-    if not token_val:
+def revoke_token(body: RevokeTokenRequest, db: Session = Depends(get_db)):
+    if not body.token:
         return {"message": "ok"}
-    token_hash = hashlib.sha256(token_val.encode()).hexdigest()
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     rt = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
     if rt:
         rt.revoked = True

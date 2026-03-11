@@ -389,6 +389,8 @@ async def register_external_memory(
     memory_id = UUID(request.memory_id)
     existing = db.query(Memory).filter(Memory.id == memory_id).first()
     if existing:
+        if existing.user_id != user.id and not auth.is_superadmin:
+            raise HTTPException(403, f"No permission to update memory {memory_id}")
         existing.content = request.content
         existing.state = MemoryState.active
         db.commit()
@@ -431,6 +433,9 @@ async def register_external_memories_batch(
         memory_id = UUID(item.memory_id)
         existing = db.query(Memory).filter(Memory.id == memory_id).first()
         if existing:
+            if existing.user_id != user.id and not auth.is_superadmin:
+                results.append({"status": "forbidden", "id": str(memory_id)})
+                continue
             existing.content = item.content
             existing.state = MemoryState.active
             results.append({"status": "updated", "id": str(memory_id)})
@@ -754,8 +759,10 @@ async def pause_memories(
         return {"message": "Successfully paused all memories"}
 
     if memory_ids:
-        # Pause specific memories
         for memory_id in memory_ids:
+            memory = get_memory_or_404(db, memory_id)
+            if not auth.is_superadmin and memory.user_id != user.id:
+                raise HTTPException(403, f"No permission to pause memory {memory_id}")
             update_memory_state(db, memory_id, state, user_id)
         return {"message": f"Successfully paused {len(memory_ids)} memories"}
 
@@ -784,6 +791,10 @@ async def get_memory_access_log(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
+    memory = get_memory_or_404(db, memory_id)
+    if not auth.is_superadmin and memory.user_id != auth.db_user.id:
+        raise HTTPException(403, "No permission to view access logs for this memory")
+
     query = db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id == memory_id)
     total = query.count()
     logs = query.order_by(MemoryAccessLog.accessed_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
@@ -957,10 +968,10 @@ async def get_related_memories(
 ):
     user = auth.db_user
     
-    # Get the source memory
     memory = get_memory_or_404(db, memory_id)
-    
-    # Extract category IDs from the source memory
+    if not auth.is_superadmin and memory.user_id != user.id:
+        raise HTTPException(403, "No permission to view related memories")
+
     category_ids = [category.id for category in memory.categories]
     
     if not category_ids:

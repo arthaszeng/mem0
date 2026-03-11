@@ -645,7 +645,9 @@ async def run_agent_task(prompt: str) -> str:
     import httpx
 
     agent_url = os.getenv("LANGGRAPH_AGENT_URL", "http://127.0.0.1:8766")
-    uid = user_id_var.get("arthaszeng")
+    uid = user_id_var.get(None)
+    if not uid:
+        return "Error: user_id not available in current session"
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(

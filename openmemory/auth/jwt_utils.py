@@ -75,9 +75,14 @@ def sign_access_token(
     return jwt.encode(payload, _private_key, algorithm="RS256", headers={"kid": _kid})
 
 
-def verify_access_token(token: str) -> dict:
+def verify_access_token(token: str, expected_issuer: str | None = None) -> dict:
     _ensure_keys()
-    return jwt.decode(token, _public_key, algorithms=["RS256"], options={"verify_iss": False})
+    from config import AUTH_BASE_URL
+    issuer = expected_issuer or AUTH_BASE_URL
+    return jwt.decode(
+        token, _public_key, algorithms=["RS256"],
+        issuer=issuer, options={"verify_iss": True},
+    )
 
 
 def get_jwks() -> dict:

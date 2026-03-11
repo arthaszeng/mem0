@@ -11,7 +11,7 @@ from config import ACCESS_TOKEN_EXPIRE_SECONDS, AUTH_BASE_URL
 from database import get_db
 from dependencies import get_current_user
 from jwt_utils import sign_access_token, verify_access_token
-from models import ApiKey, User
+from models import ApiKey, RefreshToken, User
 from schemas import ChangePasswordRequest, LoginRequest, LoginResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -89,6 +89,10 @@ def change_password(
         raise HTTPException(400, "Old password incorrect")
     user.password_hash = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
     user.must_change_password = False
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked == False,
+    ).update({"revoked": True})
     db.commit()
     return {"message": "Password changed"}
 

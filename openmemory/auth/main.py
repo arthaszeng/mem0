@@ -11,6 +11,7 @@ from config import (
     CHATGPT_CLIENT_SECRET,
     CHATGPT_REDIRECT_URI,
     CHROME_EXT_CLIENT_ID,
+    CHROME_EXT_REDIRECT_URIS,
     INIT_ADMIN_PASSWORD,
     INIT_ADMIN_USER,
 )
@@ -26,9 +27,11 @@ logger = logging.getLogger("auth-service")
 
 app = FastAPI(title="Auth Service", docs_url="/auth/docs", openapi_url="/auth/openapi.json")
 
+import os as _os
+_cors_origins = [o.strip() for o in _os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -76,7 +79,7 @@ def _init_oauth_clients():
             db.add(OAuthClient(
                 client_id=CHROME_EXT_CLIENT_ID,
                 client_name="Chrome Extension",
-                redirect_uris=json.dumps([]),
+                redirect_uris=json.dumps(CHROME_EXT_REDIRECT_URIS),
                 grant_types=json.dumps(["authorization_code", "refresh_token"]),
                 is_dynamic=False,
             ))

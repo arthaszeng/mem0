@@ -2,12 +2,19 @@ from typing import Any, Dict, Optional
 
 from app.database import get_db
 from app.models import Config as ConfigModel
+from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user
 from app.utils.memory import reset_memory_client
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1/config", tags=["config"])
+
+
+def _require_superadmin(auth: AuthenticatedUser = Depends(get_authenticated_user)) -> AuthenticatedUser:
+    if not auth.is_superadmin:
+        raise HTTPException(403, "Superadmin required for config changes")
+    return auth
 
 class LLMConfig(BaseModel):
     model: str = Field(..., description="LLM model name")
@@ -141,13 +148,20 @@ def save_config_to_db(db: Session, config: Dict[str, Any], key: str = "main"):
     return db_config.value
 
 @router.get("/", response_model=ConfigSchema)
-async def get_configuration(db: Session = Depends(get_db)):
+async def get_configuration(
+    db: Session = Depends(get_db),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
     """Get the current configuration."""
     config = get_config_from_db(db)
     return config
 
 @router.put("/", response_model=ConfigSchema)
-async def update_configuration(config: ConfigSchema, db: Session = Depends(get_db)):
+async def update_configuration(
+    config: ConfigSchema,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Update the configuration."""
     current_config = get_config_from_db(db)
     
@@ -174,7 +188,11 @@ async def update_configuration(config: ConfigSchema, db: Session = Depends(get_d
     
 
 @router.patch("/", response_model=ConfigSchema)
-async def patch_configuration(config_update: ConfigSchema, db: Session = Depends(get_db)):
+async def patch_configuration(
+    config_update: ConfigSchema,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Update parts of the configuration."""
     current_config = get_config_from_db(db)
 
@@ -195,7 +213,10 @@ async def patch_configuration(config_update: ConfigSchema, db: Session = Depends
 
 
 @router.post("/reset", response_model=ConfigSchema)
-async def reset_configuration(db: Session = Depends(get_db)):
+async def reset_configuration(
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Reset the configuration to default values."""
     try:
         # Get the default configuration with proper provider setups
@@ -212,14 +233,21 @@ async def reset_configuration(db: Session = Depends(get_db)):
         )
 
 @router.get("/mem0/llm", response_model=LLMProvider)
-async def get_llm_configuration(db: Session = Depends(get_db)):
+async def get_llm_configuration(
+    db: Session = Depends(get_db),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
     """Get only the LLM configuration."""
     config = get_config_from_db(db)
     llm_config = config.get("mem0", {}).get("llm", {})
     return llm_config
 
 @router.put("/mem0/llm", response_model=LLMProvider)
-async def update_llm_configuration(llm_config: LLMProvider, db: Session = Depends(get_db)):
+async def update_llm_configuration(
+    llm_config: LLMProvider,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Update only the LLM configuration."""
     current_config = get_config_from_db(db)
     
@@ -236,14 +264,21 @@ async def update_llm_configuration(llm_config: LLMProvider, db: Session = Depend
     return current_config["mem0"]["llm"]
 
 @router.get("/mem0/embedder", response_model=EmbedderProvider)
-async def get_embedder_configuration(db: Session = Depends(get_db)):
+async def get_embedder_configuration(
+    db: Session = Depends(get_db),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
     """Get only the Embedder configuration."""
     config = get_config_from_db(db)
     embedder_config = config.get("mem0", {}).get("embedder", {})
     return embedder_config
 
 @router.put("/mem0/embedder", response_model=EmbedderProvider)
-async def update_embedder_configuration(embedder_config: EmbedderProvider, db: Session = Depends(get_db)):
+async def update_embedder_configuration(
+    embedder_config: EmbedderProvider,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Update only the Embedder configuration."""
     current_config = get_config_from_db(db)
     
@@ -260,14 +295,21 @@ async def update_embedder_configuration(embedder_config: EmbedderProvider, db: S
     return current_config["mem0"]["embedder"]
 
 @router.get("/mem0/vector_store", response_model=Optional[VectorStoreProvider])
-async def get_vector_store_configuration(db: Session = Depends(get_db)):
+async def get_vector_store_configuration(
+    db: Session = Depends(get_db),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
     """Get only the Vector Store configuration."""
     config = get_config_from_db(db)
     vector_store_config = config.get("mem0", {}).get("vector_store", None)
     return vector_store_config
 
 @router.put("/mem0/vector_store", response_model=VectorStoreProvider)
-async def update_vector_store_configuration(vector_store_config: VectorStoreProvider, db: Session = Depends(get_db)):
+async def update_vector_store_configuration(
+    vector_store_config: VectorStoreProvider,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Update only the Vector Store configuration."""
     current_config = get_config_from_db(db)
     
@@ -284,14 +326,21 @@ async def update_vector_store_configuration(vector_store_config: VectorStoreProv
     return current_config["mem0"]["vector_store"]
 
 @router.get("/openmemory", response_model=OpenMemoryConfig)
-async def get_openmemory_configuration(db: Session = Depends(get_db)):
+async def get_openmemory_configuration(
+    db: Session = Depends(get_db),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
     """Get only the OpenMemory configuration."""
     config = get_config_from_db(db)
     openmemory_config = config.get("openmemory", {})
     return openmemory_config
 
 @router.put("/openmemory", response_model=OpenMemoryConfig)
-async def update_openmemory_configuration(openmemory_config: OpenMemoryConfig, db: Session = Depends(get_db)):
+async def update_openmemory_configuration(
+    openmemory_config: OpenMemoryConfig,
+    db: Session = Depends(get_db),
+    admin: AuthenticatedUser = Depends(_require_superadmin),
+):
     """Update only the OpenMemory configuration."""
     current_config = get_config_from_db(db)
     

@@ -16,8 +16,7 @@ services:
   auth-service:
     build: openmemory/auth/
     env_file: .env.local
-    ports:
-      - "8760:8760"
+    # ports intentionally not exposed — access via nginx gateway only
     volumes:
       - ./openmemory/auth:/app
       - auth_data:/data
@@ -28,8 +27,7 @@ services:
   # ===== Vector Store =====
   mem0-store:
     image: qdrant/qdrant
-    ports:
-      - "6333:6333"
+    # ports intentionally not exposed — internal service only
     volumes:
       - mem0_storage:/qdrant/storage
     restart: unless-stopped
@@ -40,8 +38,7 @@ services:
     env_file: .env.local
     depends_on:
       - mem0-store
-    ports:
-      - "8765:8765"
+    # ports intentionally not exposed — access via nginx gateway only
     volumes:
       - ./openmemory/api:/usr/src/openmemory
       - openmemory_data:/data

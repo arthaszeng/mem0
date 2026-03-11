@@ -358,6 +358,7 @@ async def reembed_missing_vectors(
         "failed": 0,
         "done": False,
         "type": "reembed",
+        "owner": auth.username,
     }
     asyncio.create_task(_embed_worker(task_id, embed_items))
 
@@ -374,11 +375,16 @@ async def reembed_missing_vectors(
 # ---------------------------------------------------------------------------
 
 @router.get("/import-status/{task_id}")
-async def import_status(task_id: str):
+async def import_status(
+    task_id: str,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
     """Poll background embedding progress."""
     state = _import_tasks.get(task_id)
     if not state:
         raise HTTPException(404, "Task not found")
+    if not auth.is_superadmin and state.get("owner") != auth.username:
+        raise HTTPException(403, "No permission to view this task")
     return state
 
 
@@ -807,6 +813,7 @@ async def import_backup(
         "project_slug": target_project.slug,
         "sqlite_imported": imported_count,
         "sqlite_skipped": skipped_count,
+        "owner": auth.username,
     }
 
     if embed_items:

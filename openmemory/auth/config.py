@@ -18,3 +18,6 @@ CHATGPT_CLIENT_SECRET = os.getenv("CHATGPT_CLIENT_SECRET", "")
 CHATGPT_REDIRECT_URI = os.getenv("CHATGPT_REDIRECT_URI", "https://chat.openai.com/aip/g-callback")
 
 CHROME_EXT_CLIENT_ID = os.getenv("CHROME_EXT_CLIENT_ID", "chrome-ext")
+CHROME_EXT_REDIRECT_URIS = [
+    u.strip() for u in os.getenv("CHROME_EXT_REDIRECT_URIS", "").split(",") if u.strip()
+]

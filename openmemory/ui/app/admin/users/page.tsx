@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
+import { getCookie, decodeJwtPayload, TOKEN_COOKIE } from "@/lib/auth";
 import { Plus, Trash2, RotateCcw, ShieldCheck, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -29,6 +31,7 @@ interface UserRecord {
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 export default function AdminUsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -37,6 +40,16 @@ export default function AdminUsersPage() {
   const [newEmail, setNewEmail] = useState("");
   const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    const token = getCookie(TOKEN_COOKIE);
+    if (!token) { router.replace("/login"); return; }
+    const payload = decodeJwtPayload(token);
+    if (!payload?.is_superadmin) {
+      toast.error("Superadmin access required");
+      router.replace("/");
+    }
+  }, [router]);
 
   const fetchUsers = useCallback(async () => {
     try {
