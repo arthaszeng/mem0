@@ -63,12 +63,18 @@ export function UsersTab() {
 
   const handlePurge = async (userId: string, username: string) => {
     if (!confirm(`PERMANENTLY DELETE user "${username}" and ALL their data?\n\nThis CANNOT be undone.`)) return;
+    setActionLoading(true);
     try {
       await api.delete(`/api/v1/projects/admin/users/${username}/purge`);
+    } catch (err: any) {
+      console.warn("OpenMemory purge skipped or failed:", err?.response?.data?.detail);
+    }
+    try {
       await api.delete(`/auth/users/${userId}?permanent=true`);
       fetchUsers();
       toast.success("User purged");
     } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed to purge user"); }
+    finally { setActionLoading(false); }
   };
 
   const handleResetPassword = async (userId: string) => {

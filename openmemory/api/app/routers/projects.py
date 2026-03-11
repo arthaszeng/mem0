@@ -503,13 +503,15 @@ def purge_user(
         raise HTTPException(403, "Superadmin required")
 
     target = db.query(User).filter(User.user_id == username).first()
-    if not target:
-        raise HTTPException(404, f"User '{username}' not found in OpenMemory")
 
-    if target.id == auth.db_user.id:
+    if target and target.id == auth.db_user.id:
         raise HTTPException(400, "Cannot purge yourself")
 
     stats = {"projects_deleted": 0, "memories_deleted": 0, "memberships_removed": 0}
+
+    if not target:
+        logger.info("User '%s' not found in OpenMemory DB — no local data to purge", username)
+        return {"message": f"User '{username}' has no data in OpenMemory", **stats}
 
     owned_projects = db.query(Project).filter(Project.owner_id == target.id).all()
     for proj in owned_projects:
