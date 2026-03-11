@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import { Plus, Trash2, RotateCcw, ShieldCheck, ShieldOff } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,7 @@ export default function AdminUsersPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -42,7 +44,7 @@ export default function AdminUsersPage() {
       setUsers(res.data);
     } catch (err: any) {
       if (err?.response?.status === 403) {
-        alert("Superadmin access required");
+        toast.error("Superadmin access required");
       }
     } finally {
       setLoading(false);
@@ -54,6 +56,7 @@ export default function AdminUsersPage() {
   }, [fetchUsers]);
 
   const handleCreate = async () => {
+    setActionLoading(true);
     try {
       await api.post("/auth/users", {
         username: newUsername,
@@ -67,8 +70,11 @@ export default function AdminUsersPage() {
       setNewEmail("");
       setIsSuperadmin(false);
       fetchUsers();
+      toast.success("User created");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to create user");
+      toast.error(err?.response?.data?.detail || "Failed to create user");
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -77,8 +83,9 @@ export default function AdminUsersPage() {
     try {
       await api.delete(`/auth/users/${userId}`);
       fetchUsers();
+      toast.success("User deactivated");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed");
+      toast.error(err?.response?.data?.detail || "Failed");
     }
   };
 
@@ -89,9 +96,9 @@ export default function AdminUsersPage() {
       await api.post(`/auth/users/${userId}/reset-password`, {
         new_password: newPw,
       });
-      alert("Password reset. User will be prompted to change on next login.");
+      toast.success("Password reset. User will be prompted to change on next login.");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed");
+      toast.error(err?.response?.data?.detail || "Failed");
     }
   };
 
@@ -128,7 +135,7 @@ export default function AdminUsersPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={handleCreate} disabled={!newUsername.trim() || !newPassword.trim()}>Create</Button>
+              <Button onClick={handleCreate} disabled={!newUsername.trim() || !newPassword.trim() || actionLoading}>{actionLoading ? "Creating..." : "Create"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

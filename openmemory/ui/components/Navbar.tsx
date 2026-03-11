@@ -12,7 +12,8 @@ import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import Image from "next/image";
 import { useStats } from "@/hooks/useStats";
 import { useAppsApi } from "@/hooks/useAppsApi";
-import { LogOut, FolderKanban, ChevronDown, ShieldCheck, UserPlus, Copy, X, Check } from "lucide-react";
+import { LogOut, FolderKanban, ChevronDown, ShieldCheck, UserPlus, Copy, X, Check, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useConfig } from "@/hooks/useConfig";
 import { deleteCookie, getCookie, TOKEN_COOKIE, decodeJwtPayload } from "@/lib/auth";
 import api from "@/lib/api";
@@ -103,6 +104,8 @@ export function Navbar() {
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadInvitePanel = useCallback(async () => {
     if (!projectSlug) return;
@@ -121,6 +124,7 @@ export function Navbar() {
   }, [inviteOpen, loadInvitePanel]);
 
   const handleCreateInvite = async () => {
+    setInviteLoading(true);
     try {
       const res = await api.post(`/api/v1/projects/${projectSlug}/invites`, {
         role: inviteRole,
@@ -130,8 +134,11 @@ export function Navbar() {
       const link = `${window.location.origin}${basePath}/invite/${token}`;
       setCreatedLink(link);
       loadInvitePanel();
+      toast.success("Invite link created");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to create invite");
+      toast.error(err?.response?.data?.detail || "Failed to create invite");
+    } finally {
+      setInviteLoading(false);
     }
   };
 
@@ -139,8 +146,9 @@ export function Navbar() {
     try {
       await api.post(`/api/v1/projects/${projectSlug}/invites/revoke`, { token });
       loadInvitePanel();
+      toast.success("Invite revoked");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to revoke invite");
+      toast.error(err?.response?.data?.detail || "Failed to revoke invite");
     }
   };
 
@@ -216,8 +224,13 @@ export function Navbar() {
   };
 
   const handleRefresh = async () => {
-    const fetchers = getFetchersForPath(pathname);
-    await Promise.allSettled(fetchers.map((fn) => fn()));
+    setRefreshing(true);
+    try {
+      const fetchers = getFetchersForPath(pathname);
+      await Promise.allSettled(fetchers.map((fn) => fn()));
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleSwitchProject = (slug: string) => {
@@ -329,8 +342,9 @@ export function Navbar() {
               variant="outline"
               size="sm"
               className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
+              disabled={refreshing}
             >
-              <FiRefreshCcw className="transition-transform duration-300 group-hover:rotate-180" />
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FiRefreshCcw className="transition-transform duration-300 group-hover:rotate-180" />}
               Refresh
             </Button>
             {canInvite && projectSlug && (
@@ -357,7 +371,7 @@ export function Navbar() {
                         <Label className="text-xs text-zinc-400">Expires (days)</Label>
                         <input type="number" min={1} max={365} value={inviteExpiry} onChange={(e) => setInviteExpiry(Number(e.target.value))} className="w-full rounded-md bg-zinc-800 border border-zinc-700 p-2 text-sm text-white mt-1" />
                       </div>
-                      <Button size="sm" onClick={handleCreateInvite}>Create Link</Button>
+                      <Button size="sm" onClick={handleCreateInvite} disabled={inviteLoading}>{inviteLoading ? "Creating..." : "Create Link"}</Button>
                     </div>
 
                     {createdLink && (

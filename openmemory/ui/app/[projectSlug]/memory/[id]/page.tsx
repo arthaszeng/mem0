@@ -27,7 +27,7 @@ function MemoryContent({ id }: { id: string }) {
       }
     };
     loadMemory();
-  }, []);
+  }, [id]);
 
   if (isLoading) {
     return <MemorySkeleton />;

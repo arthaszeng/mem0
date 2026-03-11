@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store/store";
@@ -53,7 +53,6 @@ import { formatDate } from "@/lib/helpers";
 import { useProject } from "@/contexts/ProjectContext";
 
 export function MemoryTable() {
-  const { toast } = useToast();
   const router = useRouter();
   const { projectSlug } = useProject();
   const dispatch = useDispatch();
@@ -64,8 +63,13 @@ export function MemoryTable() {
 
   const { deleteMemories, updateMemoryState, isLoading } = useMemoriesApi();
 
-  const handleDeleteMemory = (id: string) => {
-    deleteMemories([id]);
+  const handleDeleteMemory = async (id: string) => {
+    try {
+      await deleteMemories([id]);
+      toast.success("Memory deleted");
+    } catch {
+      toast.error("Failed to delete memory");
+    }
   };
 
   const handleSelectAll = (checked: boolean) => {
@@ -92,12 +96,9 @@ export function MemoryTable() {
   const handleUpdateMemoryState = async (id: string, newState: string) => {
     try {
       await updateMemoryState([id], newState);
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update memory state",
-        variant: "destructive",
-      });
+      toast.success(`Memory ${newState}`);
+    } catch {
+      toast.error("Failed to update memory state");
     }
   };
 

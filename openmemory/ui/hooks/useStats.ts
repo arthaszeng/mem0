@@ -44,8 +44,9 @@ export const useStats = (): UseMemoriesApiReturn => {
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to fetch stats';
       setError(errorMessage);
-      setIsLoading(false);
       throw new Error(errorMessage);
+    } finally {
+      setIsLoading(false);
     }
   };
 

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import { Plus, Trash2, Users, Settings2, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,7 @@ export default function ProjectsPage() {
   const [newMemberRole, setNewMemberRole] = useState("read_write");
   const [deleteTarget, setDeleteTarget] = useState<{ slug: string; name: string } | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -77,6 +79,7 @@ export default function ProjectsPage() {
   }, [selectedProject, fetchMembers]);
 
   const handleCreate = async () => {
+    setActionLoading(true);
     try {
       await api.post("/api/v1/projects", {
         name: newName,
@@ -88,26 +91,34 @@ export default function ProjectsPage() {
       setNewSlug("");
       setNewDesc("");
       fetchProjects();
+      toast.success("Project created");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to create project");
+      toast.error(err?.response?.data?.detail || "Failed to create project");
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    setActionLoading(true);
     try {
       await api.delete(`/api/v1/projects/${deleteTarget.slug}`);
       setSelectedProject(null);
       setDeleteTarget(null);
       setDeleteConfirmText("");
       fetchProjects();
+      toast.success("Project deleted");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to delete project");
+      toast.error(err?.response?.data?.detail || "Failed to delete project");
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handleAddMember = async () => {
     if (!selectedProject) return;
+    setActionLoading(true);
     try {
       await api.post(`/api/v1/projects/${selectedProject}/members`, {
         username: newMemberUsername,
@@ -117,8 +128,11 @@ export default function ProjectsPage() {
       setNewMemberUsername("");
       setNewMemberRole("read_write");
       fetchMembers(selectedProject);
+      toast.success("Member added");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to add member");
+      toast.error(err?.response?.data?.detail || "Failed to add member");
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -127,8 +141,9 @@ export default function ProjectsPage() {
     try {
       await api.delete(`/api/v1/projects/${selectedProject}/members/${username}`);
       fetchMembers(selectedProject);
+      toast.success("Member removed");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to remove member");
+      toast.error(err?.response?.data?.detail || "Failed to remove member");
     }
   };
 
@@ -161,7 +176,7 @@ export default function ProjectsPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={handleCreate} disabled={!newName.trim()}>Create</Button>
+              <Button onClick={handleCreate} disabled={!newName.trim() || actionLoading}>{actionLoading ? "Creating..." : "Create"}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -225,7 +240,7 @@ export default function ProjectsPage() {
                           </div>
                         </div>
                         <DialogFooter>
-                          <Button onClick={handleAddMember} disabled={!newMemberUsername.trim()}>Add</Button>
+                          <Button onClick={handleAddMember} disabled={!newMemberUsername.trim() || actionLoading}>{actionLoading ? "Adding..." : "Add"}</Button>
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
@@ -280,9 +295,9 @@ export default function ProjectsPage() {
             <Button
               variant="destructive"
               onClick={handleDelete}
-              disabled={deleteConfirmText !== deleteTarget?.slug}
+              disabled={deleteConfirmText !== deleteTarget?.slug || actionLoading}
             >
-              Delete Project
+              {actionLoading ? "Deleting..." : "Delete Project"}
             </Button>
           </DialogFooter>
         </DialogContent>

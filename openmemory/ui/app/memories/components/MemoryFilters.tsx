@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Archive, Pause, Play, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store/store";
 import { clearSelection } from "@/store/memoriesSlice";
 import { useMemoriesApi } from "@/hooks/useMemoriesApi";
+import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,39 +30,56 @@ export function MemoryFilters() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeFilters = useSelector((state: RootState) => state.filters.apps);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleDeleteSelected = async () => {
+    setActionLoading(true);
     try {
       await deleteMemories(selectedMemoryIds);
+      toast.success(`${selectedMemoryIds.length} memory(s) deleted`);
       dispatch(clearSelection());
-    } catch (error) {
-      console.error("Failed to delete memories:", error);
+    } catch {
+      toast.error("Failed to delete memories");
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handleArchiveSelected = async () => {
+    setActionLoading(true);
     try {
       await updateMemoryState(selectedMemoryIds, "archived");
-    } catch (error) {
-      console.error("Failed to archive memories:", error);
+      toast.success(`${selectedMemoryIds.length} memory(s) archived`);
+    } catch {
+      toast.error("Failed to archive memories");
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handlePauseSelected = async () => {
+    setActionLoading(true);
     try {
       await updateMemoryState(selectedMemoryIds, "paused");
-    } catch (error) {
-      console.error("Failed to pause memories:", error);
+      toast.success(`${selectedMemoryIds.length} memory(s) paused`);
+    } catch {
+      toast.error("Failed to pause memories");
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handleResumeSelected = async () => {
+    setActionLoading(true);
     try {
       await updateMemoryState(selectedMemoryIds, "active");
-    } catch (error) {
-      console.error("Failed to resume memories:", error);
+      toast.success(`${selectedMemoryIds.length} memory(s) resumed`);
+    } catch {
+      toast.error("Failed to resume memories");
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -70,7 +89,6 @@ export function MemoryFilters() {
   }, 500);
 
   useEffect(() => {
-    // if the url has a search param, set the input value to the search param
     if (searchParams.get("search")) {
       if (inputRef.current) {
         inputRef.current.value = searchParams.get("search") || "";
@@ -120,8 +138,9 @@ export function MemoryFilters() {
                 <Button
                   variant="outline"
                   className="border-zinc-700/50 bg-zinc-900 hover:bg-zinc-800"
+                  disabled={actionLoading}
                 >
-                  Actions
+                  {actionLoading ? "Processing..." : "Actions"}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
 import { Plus, Trash2, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,7 @@ export function UsersTab() {
   const [newPassword, setNewPassword] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [isSuperadmin, setIsSuperadmin] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try { const res = await api.get("/auth/users"); setUsers(res.data); }
@@ -43,26 +45,30 @@ export function UsersTab() {
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
   const handleCreate = async () => {
+    setActionLoading(true);
     try {
       await api.post("/auth/users", { username: newUsername, password: newPassword, email: newEmail || undefined, is_superadmin: isSuperadmin });
       setCreateOpen(false); setNewUsername(""); setNewPassword(""); setNewEmail(""); setIsSuperadmin(false);
       fetchUsers();
-    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to create user"); }
+      toast.success("User created");
+    } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed to create user"); }
+    finally { setActionLoading(false); }
   };
 
   const handleDeactivate = async (userId: string) => {
     if (!confirm("Deactivate this user?")) return;
-    try { await api.delete(`/auth/users/${userId}`); fetchUsers(); }
-    catch (err: any) { alert(err?.response?.data?.detail || "Failed"); }
+    try { await api.delete(`/auth/users/${userId}`); fetchUsers(); toast.success("User deactivated"); }
+    catch (err: any) { toast.error(err?.response?.data?.detail || "Failed"); }
   };
 
   const handlePurge = async (userId: string, username: string) => {
-    if (!confirm(`PERMANENTLY DELETE user "${username}" and ALL their data (projects, memories, memberships)?\n\nThis CANNOT be undone.`)) return;
+    if (!confirm(`PERMANENTLY DELETE user "${username}" and ALL their data?\n\nThis CANNOT be undone.`)) return;
     try {
       await api.delete(`/api/v1/projects/admin/users/${username}/purge`);
       await api.delete(`/auth/users/${userId}?permanent=true`);
       fetchUsers();
-    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to purge user"); }
+      toast.success("User purged");
+    } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed to purge user"); }
   };
 
   const handleResetPassword = async (userId: string) => {
@@ -70,8 +76,8 @@ export function UsersTab() {
     if (!newPw) return;
     try {
       await api.post(`/auth/users/${userId}/reset-password`, { new_password: newPw });
-      alert("Password reset. User will be prompted to change on next login.");
-    } catch (err: any) { alert(err?.response?.data?.detail || "Failed"); }
+      toast.success("Password reset. User will be prompted to change on next login.");
+    } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed"); }
   };
 
   return (
@@ -96,7 +102,7 @@ export function UsersTab() {
                 <Label htmlFor="superadmin">Superadmin</Label>
               </div>
             </div>
-            <DialogFooter><Button onClick={handleCreate} disabled={!newUsername.trim() || !newPassword.trim()}>Create</Button></DialogFooter>
+            <DialogFooter><Button onClick={handleCreate} disabled={!newUsername.trim() || !newPassword.trim() || actionLoading}>{actionLoading ? "Creating..." : "Create"}</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

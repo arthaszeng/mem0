@@ -13,6 +13,7 @@ import { Textarea } from "./ui/textarea"
 import { useRef, useState as useReactState } from "react"
 import { TOKEN_COOKIE, getCookie } from "@/lib/auth"
 import api from "@/lib/api"
+import { toast } from "sonner"
 
 interface FormViewProps {
   settings: any
@@ -31,6 +32,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
   const [clearConfirmText, setClearConfirmText] = useReactState("")
   const [isClearing, setIsClearing] = useReactState(false)
   const [clearResult, setClearResult] = useReactState("")
+  const [isExporting, setIsExporting] = useReactState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
 
@@ -515,8 +517,10 @@ export function FormView({ settings, onChange }: FormViewProps) {
               <Button
                 type="button"
                 className="bg-zinc-800 hover:bg-zinc-700"
+                disabled={isExporting}
                 onClick={async () => {
                   try {
+                    setIsExporting(true)
                     const token = getCookie(TOKEN_COOKIE)
                     const slug = selectedProjectSlug === "__all__" ? "" : selectedProjectSlug
                     const res = await fetch(`${API_URL}/api/v1/backup/export`, {
@@ -538,13 +542,16 @@ export function FormView({ settings, onChange }: FormViewProps) {
                     a.click()
                     a.remove()
                     window.URL.revokeObjectURL(url)
+                    toast.success("Export downloaded")
                   } catch (e) {
                     console.error(e)
-                    alert("Export failed. Check console for details.")
+                    toast.error("Export failed. Check console for details.")
+                  } finally {
+                    setIsExporting(false)
                   }
                 }}
               >
-                <Download className="h-4 w-4 mr-2" /> Export Memories
+                <Download className="h-4 w-4 mr-2" /> {isExporting ? "Exporting..." : "Export Memories"}
               </Button>
             </div>
           </div>
@@ -631,7 +638,7 @@ export function FormView({ settings, onChange }: FormViewProps) {
                       }
                     } catch (e) {
                       console.error(e)
-                      alert("Import failed. Check console for details.")
+                      toast.error("Import failed. Check console for details.")
                       setIsUploading(false)
                     }
                   }}

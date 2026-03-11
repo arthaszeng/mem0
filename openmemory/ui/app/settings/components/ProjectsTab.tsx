@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
-import { Plus, Trash2, Users, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Users, AlertTriangle, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,7 @@ export function ProjectsTab() {
   const [newMemberRole, setNewMemberRole] = useState("read_write");
   const [deleteTarget, setDeleteTarget] = useState<{ slug: string; name: string } | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -67,6 +69,7 @@ export function ProjectsTab() {
   useEffect(() => { if (selectedProject) fetchMembers(selectedProject); }, [selectedProject, fetchMembers]);
 
   const handleCreate = async () => {
+    setActionLoading(true);
     try {
       await api.post("/api/v1/projects", {
         name: newName, slug: newSlug || undefined, description: newDesc || undefined,
@@ -74,35 +77,45 @@ export function ProjectsTab() {
       setCreateOpen(false);
       setNewName(""); setNewSlug(""); setNewDesc("");
       fetchProjects();
-    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to create project"); }
+      toast.success("Project created");
+    } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed to create project"); }
+    finally { setActionLoading(false); }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    setActionLoading(true);
     try {
       await api.delete(`/api/v1/projects/${deleteTarget.slug}`);
       setSelectedProject(null);
       setDeleteTarget(null);
       setDeleteConfirmText("");
       fetchProjects();
+      toast.success("Project deleted");
     } catch (err: any) {
-      alert(err?.response?.data?.detail || "Failed to delete project");
-    }
+      toast.error(err?.response?.data?.detail || "Failed to delete project");
+    } finally { setActionLoading(false); }
   };
 
   const handleAddMember = async () => {
     if (!selectedProject) return;
+    setActionLoading(true);
     try {
       await api.post(`/api/v1/projects/${selectedProject}/members`, { username: newMemberUsername, role: newMemberRole });
       setAddMemberOpen(false); setNewMemberUsername(""); setNewMemberRole("read_write");
       fetchMembers(selectedProject);
-    } catch (err: any) { alert(err?.response?.data?.detail || "Failed to add member"); }
+      toast.success("Member added");
+    } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed to add member"); }
+    finally { setActionLoading(false); }
   };
 
   const handleRemoveMember = async (username: string) => {
     if (!selectedProject) return;
-    try { await api.delete(`/api/v1/projects/${selectedProject}/members/${username}`); fetchMembers(selectedProject); }
-    catch (err: any) { alert(err?.response?.data?.detail || "Failed to remove member"); }
+    try {
+      await api.delete(`/api/v1/projects/${selectedProject}/members/${username}`);
+      fetchMembers(selectedProject);
+      toast.success("Member removed");
+    } catch (err: any) { toast.error(err?.response?.data?.detail || "Failed to remove member"); }
   };
 
   return (
@@ -123,7 +136,7 @@ export function ProjectsTab() {
               <div><Label>Slug (optional)</Label><Input value={newSlug} onChange={(e) => setNewSlug(e.target.value)} placeholder="my-project" className="bg-zinc-800 border-zinc-700" /></div>
               <div><Label>Description</Label><Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Description..." className="bg-zinc-800 border-zinc-700" /></div>
             </div>
-            <DialogFooter><Button onClick={handleCreate} disabled={!newName.trim()}>Create</Button></DialogFooter>
+            <DialogFooter><Button onClick={handleCreate} disabled={!newName.trim() || actionLoading}>{actionLoading ? "Creating..." : "Create"}</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
@@ -190,7 +203,7 @@ export function ProjectsTab() {
               </select>
             </div>
           </div>
-          <DialogFooter><Button onClick={handleAddMember} disabled={!newMemberUsername.trim()}>Add</Button></DialogFooter>
+          <DialogFooter><Button onClick={handleAddMember} disabled={!newMemberUsername.trim() || actionLoading}>{actionLoading ? "Adding..." : "Add"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -220,9 +233,9 @@ export function ProjectsTab() {
             <Button
               variant="destructive"
               onClick={handleDelete}
-              disabled={deleteConfirmText !== deleteTarget?.slug}
+              disabled={deleteConfirmText !== deleteTarget?.slug || actionLoading}
             >
-              Delete Project
+              {actionLoading ? "Deleting..." : "Delete Project"}
             </Button>
           </DialogFooter>
         </DialogContent>

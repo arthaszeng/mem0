@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Copy, Trash2, Check } from "lucide-react";
 import { TOKEN_COOKIE, getCookie } from "@/lib/auth";
+import { toast } from "sonner";
 
 interface ApiKeyItem {
   id: string;
@@ -57,25 +58,39 @@ export default function ApiKeysPage() {
   const handleCreate = async () => {
     if (!newKeyName.trim()) return;
     setLoading(true);
-    const res = await fetch("/auth/api-keys", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ name: newKeyName }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setNewKeyValue(data.key);
-      await fetchKeys();
+    try {
+      const res = await fetch("/auth/api-keys", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: newKeyName }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNewKeyValue(data.key);
+        await fetchKeys();
+        toast.success("API key created");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.detail || "Failed to create API key");
+      }
+    } catch {
+      toast.error("Failed to create API key");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleRevoke = async (id: string) => {
-    await fetch(`/auth/api-keys/${id}`, {
-      method: "DELETE",
-      headers: authHeaders(),
-    });
-    await fetchKeys();
+    try {
+      await fetch(`/auth/api-keys/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      await fetchKeys();
+      toast.success("API key revoked");
+    } catch {
+      toast.error("Failed to revoke API key");
+    }
   };
 
   const handleCopy = () => {
