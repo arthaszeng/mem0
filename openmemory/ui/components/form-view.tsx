@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Eye, EyeOff, Download, Upload } from "lucide-react"
+import { Eye, EyeOff, Download, Upload, Trash2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { Input } from "./ui/input"
 import { Label } from "./ui/label"
@@ -28,6 +28,9 @@ export function FormView({ settings, onChange }: FormViewProps) {
   const [importResult, setImportResult] = useReactState("")
   const [projects, setProjects] = useReactState<{slug: string; name: string}[]>([])
   const [selectedProjectSlug, setSelectedProjectSlug] = useReactState("")
+  const [clearConfirmText, setClearConfirmText] = useReactState("")
+  const [isClearing, setIsClearing] = useReactState(false)
+  const [clearResult, setClearResult] = useReactState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
 
@@ -598,15 +601,37 @@ export function FormView({ settings, onChange }: FormViewProps) {
                       })
                       if (!res.ok) throw new Error(`Import failed with status ${res.status}`)
                       const data = await res.json()
+                      const taskId = data.task_id
                       setImportResult(
-                        `Imported ${data.imported ?? 0}, skipped ${data.skipped ?? 0}, vectors ${data.qdrant_upserted ?? 0} → ${data.project_slug ?? ""}`
+                        `DB imported ${data.imported ?? 0}, skipped ${data.skipped ?? 0}. Embedding ${data.to_embed ?? 0} vectors...`
                       )
                       if (fileInputRef.current) fileInputRef.current.value = ""
                       setSelectedImportFileName("")
+                      setIsUploading(false)
+
+                      if (taskId && (data.to_embed ?? 0) > 0) {
+                        const poll = setInterval(async () => {
+                          try {
+                            const statusRes = await api.get(`/api/v1/backup/import-status/${taskId}`)
+                            const s = statusRes.data
+                            if (s.done) {
+                              clearInterval(poll)
+                              setImportResult(
+                                `Done! DB: ${s.sqlite_imported ?? data.imported} imported. Vectors: ${s.embedded}/${s.total} embedded, ${s.failed} failed → ${s.project_slug ?? data.project_slug}`
+                              )
+                            } else {
+                              setImportResult(
+                                `DB imported ${data.imported}. Embedding: ${s.embedded}/${s.total}...`
+                              )
+                            }
+                          } catch {
+                            clearInterval(poll)
+                          }
+                        }, 3000)
+                      }
                     } catch (e) {
                       console.error(e)
                       alert("Import failed. Check console for details.")
-                    } finally {
                       setIsUploading(false)
                     }
                   }}
@@ -617,6 +642,66 @@ export function FormView({ settings, onChange }: FormViewProps) {
             </div>
             {importResult && (
               <p className="text-xs text-green-400 mt-2">{importResult}</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Danger Zone */}
+      <Card className="border-red-900/50">
+        <CardHeader>
+          <CardTitle className="text-red-400">Danger Zone</CardTitle>
+          <CardDescription>Irreversible operations. Proceed with caution.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 border border-red-900/50 rounded-lg space-y-3">
+            <div className="text-sm font-medium text-red-400">Clear All Memory Data</div>
+            <p className="text-xs text-muted-foreground">
+              Delete all your memories from both the database and vector store. User, project, and app records will be preserved. This action cannot be undone.
+            </p>
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">
+                Type <span className="font-mono text-red-400">DELETE</span> to confirm
+              </Label>
+              <Input
+                className="max-w-[240px] border-red-900/50 focus-visible:ring-red-500"
+                placeholder="DELETE"
+                value={clearConfirmText}
+                onChange={(e) => {
+                  setClearConfirmText(e.target.value)
+                  setClearResult("")
+                }}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={clearConfirmText !== "DELETE" || isClearing}
+              className="disabled:opacity-50"
+              onClick={async () => {
+                try {
+                  setIsClearing(true)
+                  setClearResult("")
+                  const res = await api.post("/api/v1/backup/clear-data")
+                  const d = res.data
+                  setClearResult(
+                    `Cleared ${d.sqlite_deleted ?? 0} DB records + ${d.qdrant_deleted ?? 0} vectors.`
+                  )
+                  setClearConfirmText("")
+                } catch (e: any) {
+                  setClearResult(`Failed: ${e?.response?.data?.detail || e.message}`)
+                } finally {
+                  setIsClearing(false)
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {isClearing ? "Clearing..." : "Clear All Memories"}
+            </Button>
+            {clearResult && (
+              <p className={`text-xs mt-1 ${clearResult.startsWith("Failed") ? "text-red-400" : "text-green-400"}`}>
+                {clearResult}
+              </p>
             )}
           </div>
         </CardContent>

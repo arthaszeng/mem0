@@ -1,22 +1,24 @@
 from datetime import UTC, datetime
+import asyncio
 import io
 import json
 import gzip
 import logging
 import zipfile
-from typing import Optional, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
-from qdrant_client.models import FieldCondition, Filter, MatchValue, ScrollRequest
+from qdrant_client.models import FieldCondition, Filter, MatchValue, PointIdsList
 
 from app.database import get_db
 from app.models import (
     User, App, Memory, MemoryState, Category, memory_categories,
     MemoryStatusHistory, AccessControl, Project, ProjectMember,
+    MemoryAccessLog,
 )
 from app.utils.memory import get_memory_client
 from app.utils.gateway_auth import (
@@ -26,6 +28,13 @@ from app.utils.gateway_auth import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/backup", tags=["backup"])
+
+EMBED_BATCH_SIZE = 20
+EMBED_TIMEOUT = 60          # seconds per batch embedding call
+EMBED_MAX_RETRIES = 2       # retry on timeout before marking failed
+
+# In-memory store for background import task progress
+_import_tasks: Dict[str, dict] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +74,90 @@ def _get_user_default_project(db: Session, user: User) -> Optional[Project]:
     return None
 
 
+def _batch_embed_and_upsert(
+    items: List[Dict[str, Any]],
+    memory_client: Any,
+    task_state: Optional[dict] = None,
+) -> Tuple[int, int]:
+    """Embed and upsert items in batches. Returns (embedded, failed) counts."""
+    vs = memory_client.vector_store
+    embedder = memory_client.embedding_model
+    embed_client = embedder.client
+    model = embedder.config.model
+    dims = getattr(embedder.config, "embedding_dims", None)
+
+    timed_client = embed_client.with_options(timeout=EMBED_TIMEOUT)
+
+    embedded = 0
+    failed = 0
+    total_batches = (len(items) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+
+    for batch_idx, i in enumerate(range(0, len(items), EMBED_BATCH_SIZE)):
+        batch = items[i : i + EMBED_BATCH_SIZE]
+        texts = [it["content"].replace("\n", " ") for it in batch]
+
+        vectors = None
+        for attempt in range(EMBED_MAX_RETRIES + 1):
+            try:
+                kwargs: dict = {"input": texts, "model": model}
+                if dims:
+                    kwargs["dimensions"] = dims
+                logger.info("Embed batch %d/%d (%d items), attempt %d", batch_idx + 1, total_batches, len(batch), attempt + 1)
+                response = timed_client.embeddings.create(**kwargs)
+                vectors = [d.embedding for d in response.data]
+                break
+            except Exception as e:
+                logger.warning("Embed batch %d attempt %d failed: %s", batch_idx + 1, attempt + 1, e)
+                if attempt == EMBED_MAX_RETRIES:
+                    failed += len(batch)
+                    if task_state is not None:
+                        task_state["failed"] += len(batch)
+
+        if vectors is None:
+            continue
+
+        payloads = [it["payload"] for it in batch]
+        ids = [it["id"] for it in batch]
+
+        try:
+            vs.insert(vectors=vectors, payloads=payloads, ids=ids)
+            embedded += len(batch)
+        except Exception as e:
+            logger.warning("Batch upsert failed (batch %d/%d): %s", batch_idx + 1, total_batches, e)
+            failed += len(batch)
+            if task_state is not None:
+                task_state["failed"] += len(batch)
+            continue
+
+        if task_state is not None:
+            task_state["embedded"] += len(batch)
+
+    return embedded, failed
+
+
+async def _embed_worker(task_id: str, items: List[Dict[str, Any]]) -> None:
+    """Background task: batch-embed items and update _import_tasks progress."""
+    state = _import_tasks.get(task_id)
+    if not state:
+        return
+
+    memory_client = get_memory_client()
+    if not memory_client or not hasattr(memory_client, "embedding_model"):
+        state["done"] = True
+        state["error"] = "Memory client unavailable"
+        return
+
+    try:
+        await asyncio.to_thread(_batch_embed_and_upsert, items, memory_client, state)
+    except Exception as e:
+        logger.error("Embed worker %s failed: %s", task_id, e)
+        state["error"] = str(e)
+    finally:
+        state["done"] = True
+
+
 # ---------------------------------------------------------------------------
-# 0. Data Migration: backfill project_id for existing memories
+# 0. Data Management: migration, clear, reembed
 # ---------------------------------------------------------------------------
 
 @router.post("/migrate-project")
@@ -74,12 +165,7 @@ async def migrate_project_ids(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Backfill project_id on memories where it is NULL.
-
-    - SQLite: set project_id to the user's default project
-    - Qdrant: set_payload to add project_id for matching points
-    Superadmin only.
-    """
+    """Backfill project_id on memories where it is NULL. Superadmin only."""
     if not auth.is_superadmin:
         raise HTTPException(403, "Superadmin required")
 
@@ -88,7 +174,6 @@ async def migrate_project_ids(
     if not project:
         raise HTTPException(400, "No default project found for user")
 
-    # --- SQLite ---
     orphan_memories = (
         db.query(Memory)
         .filter(Memory.user_id == user.id, Memory.project_id.is_(None))
@@ -98,9 +183,7 @@ async def migrate_project_ids(
     for m in orphan_memories:
         m.project_id = project.id
     db.commit()
-    logger.info("SQLite migration: set project_id on %d memories for user %s", sqlite_count, user.user_id)
 
-    # --- Qdrant ---
     qdrant_count = 0
     memory_client = get_memory_client()
     if memory_client:
@@ -109,7 +192,7 @@ async def migrate_project_ids(
             collection = vs.collection_name
             offset = None
             while True:
-                result = vs.client.scroll(
+                points, next_offset = vs.client.scroll(
                     collection_name=collection,
                     scroll_filter=Filter(must=[
                         FieldCondition(key="user_id", match=MatchValue(value=user.user_id)),
@@ -119,13 +202,7 @@ async def migrate_project_ids(
                     with_payload=True,
                     with_vectors=False,
                 )
-                points, next_offset = result
-                ids_to_update = []
-                for pt in points:
-                    payload = pt.payload or {}
-                    if not payload.get("project_id"):
-                        ids_to_update.append(pt.id)
-
+                ids_to_update = [pt.id for pt in points if not (pt.payload or {}).get("project_id")]
                 if ids_to_update:
                     vs.client.set_payload(
                         collection_name=collection,
@@ -133,12 +210,9 @@ async def migrate_project_ids(
                         points=ids_to_update,
                     )
                     qdrant_count += len(ids_to_update)
-
                 if next_offset is None:
                     break
                 offset = next_offset
-
-    logger.info("Qdrant migration: set project_id on %d points for user %s", qdrant_count, user.user_id)
 
     return {
         "message": f"Migration complete for user '{user.user_id}'",
@@ -147,6 +221,165 @@ async def migrate_project_ids(
         "sqlite_updated": sqlite_count,
         "qdrant_updated": qdrant_count,
     }
+
+
+@router.post("/clear-data")
+async def clear_user_data(
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Delete ALL memory data for the current user (SQLite + Qdrant).
+    Preserves user, project, and app records. Superadmin only."""
+    if not auth.is_superadmin:
+        raise HTTPException(403, "Superadmin required")
+
+    user = auth.db_user
+    memory_ids = [
+        mid for (mid,) in db.query(Memory.id).filter(Memory.user_id == user.id).all()
+    ]
+
+    if memory_ids:
+        db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id.in_(memory_ids)).delete(synchronize_session=False)
+        db.execute(memory_categories.delete().where(memory_categories.c.memory_id.in_(memory_ids)))
+        db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(memory_ids)).delete(synchronize_session=False)
+        db.query(Memory).filter(Memory.id.in_(memory_ids)).delete(synchronize_session=False)
+        db.commit()
+
+    sqlite_deleted = len(memory_ids)
+
+    qdrant_deleted = 0
+    memory_client = get_memory_client()
+    if memory_client:
+        vs = getattr(memory_client, "vector_store", None)
+        if vs and hasattr(vs, "client"):
+            collection = vs.collection_name
+            offset = None
+            all_point_ids: list = []
+            while True:
+                points, next_offset = vs.client.scroll(
+                    collection_name=collection,
+                    scroll_filter=Filter(must=[
+                        FieldCondition(key="user_id", match=MatchValue(value=user.user_id)),
+                    ]),
+                    limit=100,
+                    offset=offset,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                all_point_ids.extend(pt.id for pt in points)
+                if next_offset is None:
+                    break
+                offset = next_offset
+
+            if all_point_ids:
+                vs.client.delete(
+                    collection_name=collection,
+                    points_selector=PointIdsList(points=all_point_ids),
+                )
+                qdrant_deleted = len(all_point_ids)
+
+    logger.info("Cleared %d SQLite memories + %d Qdrant points for user %s", sqlite_deleted, qdrant_deleted, user.user_id)
+    return {
+        "message": f"Cleared all memory data for '{user.user_id}'",
+        "sqlite_deleted": sqlite_deleted,
+        "qdrant_deleted": qdrant_deleted,
+    }
+
+
+@router.post("/reembed")
+async def reembed_missing_vectors(
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Re-embed memories missing from Qdrant using batch embedding. Superadmin only.
+    Returns a task_id; embedding runs in the background."""
+    if not auth.is_superadmin:
+        raise HTTPException(403, "Superadmin required")
+
+    user = auth.db_user
+    memory_client = get_memory_client()
+    if not memory_client or not hasattr(memory_client, "embedding_model"):
+        raise HTTPException(503, "Memory client or embedding model unavailable")
+
+    vs = getattr(memory_client, "vector_store", None)
+    if not vs or not hasattr(vs, "client"):
+        raise HTTPException(503, "Vector store unavailable")
+
+    all_memories = (
+        db.query(Memory)
+        .options(joinedload(Memory.app))
+        .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+        .all()
+    )
+    sqlite_ids = {str(m.id) for m in all_memories}
+    mem_by_id = {str(m.id): m for m in all_memories}
+
+    qdrant_ids: set = set()
+    offset = None
+    while True:
+        points, next_offset = vs.client.scroll(
+            collection_name=vs.collection_name,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="user_id", match=MatchValue(value=user.user_id)),
+            ]),
+            limit=100, offset=offset, with_payload=False, with_vectors=False,
+        )
+        qdrant_ids.update(str(pt.id) for pt in points)
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    missing_ids = sqlite_ids - qdrant_ids
+
+    embed_items = []
+    for mid in missing_ids:
+        m = mem_by_id[mid]
+        content = m.content or ""
+        if not content.strip():
+            continue
+        payload: dict = {
+            "data": content,
+            "user_id": user.user_id,
+            "source_app": "openmemory",
+            "mcp_client": m.app.name if m.app else "openmemory",
+        }
+        if m.project_id:
+            payload["project_id"] = str(m.project_id)
+        if m.created_at:
+            payload["created_at"] = _iso(m.created_at)
+        if m.updated_at:
+            payload["updated_at"] = _iso(m.updated_at)
+        embed_items.append({"id": str(m.id), "content": content, "payload": payload})
+
+    task_id = uuid4().hex[:12]
+    _import_tasks[task_id] = {
+        "total": len(embed_items),
+        "embedded": 0,
+        "failed": 0,
+        "done": False,
+        "type": "reembed",
+    }
+    asyncio.create_task(_embed_worker(task_id, embed_items))
+
+    return {
+        "task_id": task_id,
+        "sqlite_active": len(sqlite_ids),
+        "qdrant_existing": len(qdrant_ids),
+        "to_embed": len(embed_items),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Import task status
+# ---------------------------------------------------------------------------
+
+@router.get("/import-status/{task_id}")
+async def import_status(task_id: str):
+    """Poll background embedding progress."""
+    state = _import_tasks.get(task_id)
+    if not state:
+        raise HTTPException(404, "Task not found")
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -194,19 +427,15 @@ def _export_sqlite(
 
     app_ids = sorted({m.app_id for m in memories if m.app_id})
     apps = db.query(App).filter(App.id.in_(app_ids)).all() if app_ids else []
-
     cats = sorted({c for m in memories for c in m.categories}, key=lambda c: str(c.id))
-
     mc_rows = (
         db.execute(memory_categories.select().where(memory_categories.c.memory_id.in_(memory_ids))).fetchall()
         if memory_ids else []
     )
-
     history = (
         db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(memory_ids)).all()
         if memory_ids else []
     )
-
     acls = (
         db.query(AccessControl).filter(
             AccessControl.subject_type == "app",
@@ -215,120 +444,70 @@ def _export_sqlite(
         if app_ids else []
     )
 
-    # Collect referenced projects
     project_ids = sorted({m.project_id for m in memories if m.project_id})
     projects = db.query(Project).filter(Project.id.in_(project_ids)).all() if project_ids else []
-    project_map = {p.id: p for p in projects}
 
     return {
         "user": {
-            "id": str(user.id),
-            "user_id": user.user_id,
-            "name": user.name,
-            "email": user.email,
-            "metadata": user.metadata_,
-            "created_at": _iso(user.created_at),
-            "updated_at": _iso(user.updated_at),
+            "id": str(user.id), "user_id": user.user_id, "name": user.name,
+            "email": user.email, "metadata": user.metadata_,
+            "created_at": _iso(user.created_at), "updated_at": _iso(user.updated_at),
         },
         "projects": [
-            {
-                "id": str(p.id),
-                "name": p.name,
-                "slug": p.slug,
-                "owner_username": p.owner.user_id if p.owner else None,
-                "description": p.description,
-            }
+            {"id": str(p.id), "name": p.name, "slug": p.slug,
+             "owner_username": p.owner.user_id if p.owner else None, "description": p.description}
             for p in projects
         ],
         "apps": [
-            {
-                "id": str(a.id),
-                "owner_id": str(a.owner_id),
-                "name": a.name,
-                "description": a.description,
-                "metadata": a.metadata_,
-                "is_active": a.is_active,
-                "created_at": _iso(a.created_at),
-                "updated_at": _iso(a.updated_at),
-            }
+            {"id": str(a.id), "owner_id": str(a.owner_id), "name": a.name, "description": a.description,
+             "metadata": a.metadata_, "is_active": a.is_active,
+             "created_at": _iso(a.created_at), "updated_at": _iso(a.updated_at)}
             for a in apps
         ],
         "categories": [
-            {
-                "id": str(c.id),
-                "name": c.name,
-                "description": c.description,
-                "created_at": _iso(c.created_at),
-                "updated_at": _iso(c.updated_at),
-            }
+            {"id": str(c.id), "name": c.name, "description": c.description,
+             "created_at": _iso(c.created_at), "updated_at": _iso(c.updated_at)}
             for c in cats
         ],
         "memories": [
-            {
-                "id": str(m.id),
-                "user_id": str(m.user_id),
-                "app_id": str(m.app_id) if m.app_id else None,
-                "app_name": m.app.name if m.app else None,
-                "project_id": str(m.project_id) if m.project_id else None,
-                "project_slug": m.project.slug if m.project else None,
-                "creator_username": m.user.user_id if m.user else None,
-                "content": m.content,
-                "metadata": m.metadata_,
-                "state": m.state.value,
-                "created_at": _iso(m.created_at),
-                "updated_at": _iso(m.updated_at),
-                "archived_at": _iso(m.archived_at),
-                "deleted_at": _iso(m.deleted_at),
-                "category_ids": [str(c.id) for c in m.categories],
-            }
+            {"id": str(m.id), "user_id": str(m.user_id),
+             "app_id": str(m.app_id) if m.app_id else None,
+             "app_name": m.app.name if m.app else None,
+             "project_id": str(m.project_id) if m.project_id else None,
+             "project_slug": m.project.slug if m.project else None,
+             "creator_username": m.user.user_id if m.user else None,
+             "content": m.content, "metadata": m.metadata_, "state": m.state.value,
+             "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at),
+             "archived_at": _iso(m.archived_at), "deleted_at": _iso(m.deleted_at),
+             "category_ids": [str(c.id) for c in m.categories]}
             for m in memories
         ],
-        "memory_categories": [
-            {"memory_id": str(r.memory_id), "category_id": str(r.category_id)}
-            for r in mc_rows
-        ],
+        "memory_categories": [{"memory_id": str(r.memory_id), "category_id": str(r.category_id)} for r in mc_rows],
         "status_history": [
-            {
-                "id": str(h.id),
-                "memory_id": str(h.memory_id),
-                "changed_by": str(h.changed_by),
-                "old_state": h.old_state.value,
-                "new_state": h.new_state.value,
-                "changed_at": _iso(h.changed_at),
-            }
+            {"id": str(h.id), "memory_id": str(h.memory_id), "changed_by": str(h.changed_by),
+             "old_state": h.old_state.value, "new_state": h.new_state.value, "changed_at": _iso(h.changed_at)}
             for h in history
         ],
         "access_controls": [
-            {
-                "id": str(ac.id),
-                "subject_type": ac.subject_type,
-                "subject_id": str(ac.subject_id) if ac.subject_id else None,
-                "object_type": ac.object_type,
-                "object_id": str(ac.object_id) if ac.object_id else None,
-                "effect": ac.effect,
-                "created_at": _iso(ac.created_at),
-            }
+            {"id": str(ac.id), "subject_type": ac.subject_type,
+             "subject_id": str(ac.subject_id) if ac.subject_id else None,
+             "object_type": ac.object_type, "object_id": str(ac.object_id) if ac.object_id else None,
+             "effect": ac.effect, "created_at": _iso(ac.created_at)}
             for ac in acls
         ],
         "export_meta": {
             "app_id_filter": str(req.app_id) if req.app_id else None,
             "project_slug_filter": req.project_slug,
-            "from_date": req.from_date,
-            "to_date": req.to_date,
-            "version": "2",
-            "generated_at": datetime.now(UTC).isoformat(),
+            "from_date": req.from_date, "to_date": req.to_date,
+            "version": "2", "generated_at": datetime.now(UTC).isoformat(),
         },
     }
 
 
 def _export_logical_memories_gz(
-    db: Session,
-    *,
-    user: User,
-    app_id: Optional[UUID] = None,
-    from_date: Optional[int] = None,
-    to_date: Optional[int] = None,
-    project: Optional[Project] = None,
+    db: Session, *, user: User,
+    app_id: Optional[UUID] = None, from_date: Optional[int] = None,
+    to_date: Optional[int] = None, project: Optional[Project] = None,
 ) -> bytes:
     time_filters = []
     if from_date:
@@ -338,16 +517,9 @@ def _export_logical_memories_gz(
 
     q = (
         db.query(Memory)
-        .options(
-            joinedload(Memory.categories),
-            joinedload(Memory.app),
-            joinedload(Memory.project),
-        )
-        .filter(
-            Memory.user_id == user.id,
-            *(time_filters or []),
-            *([Memory.project_id == project.id] if project else []),
-        )
+        .options(joinedload(Memory.categories), joinedload(Memory.app), joinedload(Memory.project))
+        .filter(Memory.user_id == user.id, *(time_filters or []),
+                *([Memory.project_id == project.id] if project else []))
     )
     if app_id:
         q = q.filter(Memory.app_id == app_id)
@@ -356,13 +528,9 @@ def _export_logical_memories_gz(
     with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
         for m in q.all():
             record = {
-                "id": str(m.id),
-                "content": m.content,
-                "metadata": m.metadata_ or {},
-                "created_at": _iso(m.created_at),
-                "updated_at": _iso(m.updated_at),
-                "state": m.state.value,
-                "app": m.app.name if m.app else None,
+                "id": str(m.id), "content": m.content, "metadata": m.metadata_ or {},
+                "created_at": _iso(m.created_at), "updated_at": _iso(m.updated_at),
+                "state": m.state.value, "app": m.app.name if m.app else None,
                 "categories": [c.name for c in m.categories],
                 "project_slug": m.project.slug if m.project else None,
                 "creator_username": user.user_id,
@@ -378,7 +546,6 @@ async def export_backup(
     db: Session = Depends(get_db),
 ):
     user = auth.db_user
-
     project = None
     if req.project_slug:
         pctx = resolve_project(auth, db, req.project_slug)
@@ -386,12 +553,8 @@ async def export_backup(
 
     sqlite_payload = _export_sqlite(db=db, user=user, req=req, project=project)
     memories_blob = _export_logical_memories_gz(
-        db=db,
-        user=user,
-        app_id=req.app_id,
-        from_date=req.from_date,
-        to_date=req.to_date,
-        project=project,
+        db=db, user=user, app_id=req.app_id,
+        from_date=req.from_date, to_date=req.to_date, project=project,
     )
 
     zip_buf = io.BytesIO()
@@ -401,27 +564,25 @@ async def export_backup(
 
     zip_buf.seek(0)
     return StreamingResponse(
-        zip_buf,
-        media_type="application/zip",
+        zip_buf, media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="memories_export_{auth.username}.zip"'},
     )
 
 
 # ---------------------------------------------------------------------------
-# 2. Import
+# 2. Import (async: SQLite sync + background batch embed)
 # ---------------------------------------------------------------------------
 
 @router.post("/import")
 async def import_backup(
     file: UploadFile = File(..., description="Zip with memories.json and memories.jsonl.gz"),
-    project_slug: Optional[str] = Form(None, description="Target project slug (required for v1 import)"),
+    project_slug: Optional[str] = Form(None, description="Target project slug"),
     mode: str = Query("overwrite"),
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Expected a zip file.")
-
     if mode not in {"skip", "overwrite"}:
         raise HTTPException(status_code=400, detail="Invalid mode. Must be 'skip' or 'overwrite'.")
 
@@ -444,7 +605,6 @@ async def import_backup(
             sqlite_member = find_member("memories.json")
             if not sqlite_member:
                 raise HTTPException(status_code=400, detail="memories.json missing in zip")
-
             memories_member = find_member("memories.jsonl.gz")
             sqlite_data = json.loads(zf.read(sqlite_member))
             memories_blob = zf.read(memories_member) if memories_member else None
@@ -464,9 +624,9 @@ async def import_backup(
     if not target_project:
         target_project = _get_user_default_project(db, user)
     if not target_project:
-        raise HTTPException(400, "No target project available. Specify project_slug or create a project first.")
+        raise HTTPException(400, "No target project available.")
 
-    # --- Ensure default app, build app lookup ---
+    # --- Ensure default app ---
     default_app = db.query(App).filter(App.owner_id == user.id, App.name == "openmemory").first()
     if not default_app:
         default_app = App(owner_id=user.id, name="openmemory", is_active=True, metadata_={})
@@ -497,7 +657,7 @@ async def import_backup(
             db.refresh(cat)
         cat_id_map[c["id"]] = cat.id
 
-    # --- Import memories (SQLite) ---
+    # --- Import memories (SQLite — synchronous, fast) ---
     old_to_new_id: Dict[str, UUID] = {}
     app_for_memory: Dict[str, str] = {}
     imported_count = 0
@@ -511,15 +671,12 @@ async def import_backup(
             target_id = uuid4()
         else:
             target_id = incoming_id
-
         old_to_new_id[m["id"]] = target_id
 
-        # Resolve app from export data
         app_name = m.get("app_name") or None
         app_obj = _resolve_app(app_name)
         app_for_memory[m["id"]] = app_obj.name
 
-        # Resolve per-memory project: form param > per-memory slug > default
         mem_project = target_project
         if export_version >= "2" and not project_slug and m.get("project_slug"):
             pctx = resolve_project(auth, db, m["project_slug"], min_role=ProjectRole.read_write)
@@ -531,13 +688,12 @@ async def import_backup(
             continue
 
         if existing and (existing.user_id == user.id) and mode == "overwrite":
-            incoming_state = m.get("state", "active")
             existing.app_id = app_obj.id
             existing.project_id = mem_project.id
             existing.content = m.get("content") or ""
             existing.metadata_ = m.get("metadata") or {}
             try:
-                existing.state = MemoryState(incoming_state)
+                existing.state = MemoryState(m.get("state", "active"))
             except Exception:
                 existing.state = MemoryState.active
             existing.archived_at = _parse_iso(m.get("archived_at"))
@@ -550,12 +706,8 @@ async def import_backup(
             continue
 
         new_mem = Memory(
-            id=target_id,
-            user_id=user.id,
-            app_id=app_obj.id,
-            project_id=mem_project.id,
-            content=m.get("content") or "",
-            metadata_=m.get("metadata") or {},
+            id=target_id, user_id=user.id, app_id=app_obj.id, project_id=mem_project.id,
+            content=m.get("content") or "", metadata_=m.get("metadata") or {},
             state=MemoryState(m.get("state", "active")) if m.get("state") else MemoryState.active,
             created_at=_parse_iso(m.get("created_at")) or datetime.now(UTC),
             updated_at=_parse_iso(m.get("updated_at")) or datetime.now(UTC),
@@ -601,69 +753,69 @@ async def import_backup(
         db.add(rec)
         db.commit()
 
-    # --- Qdrant upsert ---
-    qdrant_count = 0
-    memory_client = get_memory_client()
-    vector_store = getattr(memory_client, "vector_store", None) if memory_client else None
+    # --- Build embed items for background task ---
+    embed_items: List[Dict[str, Any]] = []
 
-    if vector_store and memory_client and hasattr(memory_client, "embedding_model"):
-        def iter_logical_records():
-            if memories_blob:
-                gz_buf = io.BytesIO(memories_blob)
-                with gzip.GzipFile(fileobj=gz_buf, mode="rb") as gz:
-                    for raw in gz:
-                        yield json.loads(raw.decode("utf-8"))
-            else:
-                for m in sqlite_data.get("memories", []):
-                    yield {
-                        "id": m["id"],
-                        "content": m.get("content"),
-                        "metadata": m.get("metadata") or {},
-                        "created_at": m.get("created_at"),
-                        "updated_at": m.get("updated_at"),
-                        "app_name": m.get("app_name"),
-                    }
+    def _iter_logical_records():
+        if memories_blob:
+            gz_buf = io.BytesIO(memories_blob)
+            with gzip.GzipFile(fileobj=gz_buf, mode="rb") as gz:
+                for raw in gz:
+                    yield json.loads(raw.decode("utf-8"))
+        else:
+            for m in sqlite_data.get("memories", []):
+                yield {
+                    "id": m["id"], "content": m.get("content"),
+                    "metadata": m.get("metadata") or {},
+                    "created_at": m.get("created_at"), "updated_at": m.get("updated_at"),
+                    "app_name": m.get("app_name"),
+                }
 
-        for rec in iter_logical_records():
-            old_id = rec["id"]
-            new_id = old_to_new_id.get(old_id, UUID(old_id))
-            rec_content = rec.get("content") or ""
-            metadata = rec.get("metadata") or {}
-            created_at = rec.get("created_at")
-            updated_at = rec.get("updated_at")
-            rec_app_name = rec.get("app") or rec.get("app_name") or app_for_memory.get(old_id, "openmemory")
+    for rec in _iter_logical_records():
+        old_id = rec["id"]
+        new_id = old_to_new_id.get(old_id, UUID(old_id))
+        rec_content = rec.get("content") or ""
+        if not rec_content.strip():
+            continue
 
-            if mode == "skip":
-                try:
-                    get_fn = getattr(vector_store, "get", None)
-                    if callable(get_fn) and vector_store.get(str(new_id)):
-                        continue
-                except Exception:
-                    pass
+        metadata = rec.get("metadata") or {}
+        created_at = rec.get("created_at")
+        updated_at = rec.get("updated_at")
+        rec_app_name = rec.get("app") or rec.get("app_name") or app_for_memory.get(old_id, "openmemory")
 
-            payload = dict(metadata)
-            payload["data"] = rec_content
-            if created_at:
-                payload["created_at"] = created_at
-            if updated_at:
-                payload["updated_at"] = updated_at
-            payload["user_id"] = auth.username
-            payload["project_id"] = str(target_project.id)
-            payload["source_app"] = "openmemory"
-            payload["mcp_client"] = rec_app_name
+        payload = dict(metadata)
+        payload["data"] = rec_content
+        if created_at:
+            payload["created_at"] = created_at
+        if updated_at:
+            payload["updated_at"] = updated_at
+        payload["user_id"] = auth.username
+        payload["project_id"] = str(target_project.id)
+        payload["source_app"] = "openmemory"
+        payload["mcp_client"] = rec_app_name
 
-            try:
-                vec = memory_client.embedding_model.embed(rec_content, "add")
-                vector_store.insert(vectors=[vec], payloads=[payload], ids=[str(new_id)])
-                qdrant_count += 1
-            except Exception as e:
-                logger.warning("Vector upsert failed for memory %s: %s", new_id, e)
-                continue
+        embed_items.append({"id": str(new_id), "content": rec_content, "payload": payload})
+
+    # --- Launch background embedding task ---
+    task_id = uuid4().hex[:12]
+    _import_tasks[task_id] = {
+        "total": len(embed_items),
+        "embedded": 0,
+        "failed": 0,
+        "done": len(embed_items) == 0,
+        "type": "import",
+        "project_slug": target_project.slug,
+        "sqlite_imported": imported_count,
+        "sqlite_skipped": skipped_count,
+    }
+
+    if embed_items:
+        asyncio.create_task(_embed_worker(task_id, embed_items))
 
     return {
-        "message": f"Import completed into project '{target_project.slug}'",
+        "task_id": task_id,
         "project_slug": target_project.slug,
         "imported": imported_count,
         "skipped": skipped_count,
-        "qdrant_upserted": qdrant_count,
+        "to_embed": len(embed_items),
     }
