@@ -76,7 +76,13 @@ async def _memory_write_worker():
     while True:
         task = await q.get()
         try:
-            uid, client_name, text, task_project_slug = task
+            # Backward-compatible unpack: old 4-tuple or new 6-tuple
+            if len(task) == 6:
+                uid, client_name, text, task_project_slug, task_infer, task_instructions = task
+            else:
+                uid, client_name, text, task_project_slug = task
+                task_infer, task_instructions = True, ""
+
             memory_client = get_memory_client_safe()
             if not memory_client:
                 logging.warning("Memory worker: client unavailable, dropping task")
@@ -87,7 +93,6 @@ async def _memory_write_worker():
             db = SessionLocal()
             try:
                 user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
-                # Use explicit project slug from queue, fall back to default
                 pslug_token = project_slug_var.set(task_project_slug or "")
                 try:
                     project_id, _ = _resolve_project(db, user.id)
@@ -100,11 +105,21 @@ async def _memory_write_worker():
             if project_id:
                 qdrant_meta["project_id"] = project_id
 
-            response = await asyncio.to_thread(
-                memory_client.add, text,
-                user_id=uid,
-                metadata=qdrant_meta,
-            )
+            saved_prompt = None
+            if task_instructions:
+                saved_prompt = memory_client.config.custom_fact_extraction_prompt
+                memory_client.config.custom_fact_extraction_prompt = task_instructions
+
+            try:
+                response = await asyncio.to_thread(
+                    memory_client.add, text,
+                    user_id=uid,
+                    metadata=qdrant_meta,
+                    infer=task_infer,
+                )
+            finally:
+                if saved_prompt is not None:
+                    memory_client.config.custom_fact_extraction_prompt = saved_prompt
 
             db = SessionLocal()
             try:
@@ -237,7 +252,17 @@ mcp_router = APIRouter(prefix="/memory-mcp")
 sse = SseServerTransport("/memory-mcp/messages/")
 
 @mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something.")
-async def add_memories(text: str) -> str:
+async def add_memories(
+    text: str,
+    infer: bool = True,
+    instructions: str = "",
+) -> str:
+    """
+    Args:
+        text: The content to memorize.
+        infer: If True (default), LLM extracts key facts from text. If False, store text as-is.
+        instructions: Per-call extraction instructions that override the global prompt for this request only.
+    """
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
 
@@ -264,7 +289,7 @@ async def add_memories(text: str) -> str:
 
     q = _get_queue()
     pslug = project_slug_var.get("")
-    await q.put((uid, client_name, text, pslug))
+    await q.put((uid, client_name, text, pslug, infer, instructions or ""))
     pending = q.qsize()
     return json.dumps({
         "status": "queued",
