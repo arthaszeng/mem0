@@ -1000,6 +1000,125 @@ async def run_agent_task(prompt: str) -> str:
         return f"Agent error: {e}"
 
 
+@mcp.tool(description="Find and consolidate similar/duplicate memories. Scans recent memories, identifies near-duplicates, and merges them into concise consolidated entries. Call periodically to keep memory clean.")
+async def consolidate_memories(dry_run: bool = True) -> str:
+    """
+    Args:
+        dry_run: If True (default), show what would be consolidated without changing anything. Set False to actually merge.
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            memories = (
+                db.query(Memory)
+                .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+                .order_by(Memory.updated_at.desc())
+                .limit(200)
+                .all()
+            )
+
+            from difflib import SequenceMatcher
+            groups = []
+            used = set()
+            for i, m1 in enumerate(memories):
+                if m1.id in used:
+                    continue
+                group = [{"id": str(m1.id), "content": m1.content}]
+                used.add(m1.id)
+                for m2 in memories[i+1:]:
+                    if m2.id in used:
+                        continue
+                    ratio = SequenceMatcher(None, m1.content.lower(), m2.content.lower()).ratio()
+                    if ratio > 0.6:
+                        group.append({"id": str(m2.id), "content": m2.content})
+                        used.add(m2.id)
+                if len(group) > 1:
+                    groups.append(group)
+
+            if not groups:
+                return json.dumps({"status": "clean", "message": "No similar memories found to consolidate"})
+
+            results = []
+            for group in groups:
+                from app.utils.intelligence import consolidate_memories as _consolidate
+                consolidated = await asyncio.to_thread(_consolidate, group)
+                entry = {
+                    "original_ids": [m["id"] for m in group],
+                    "original_count": len(group),
+                    "consolidated": consolidated or group[0]["content"],
+                }
+                results.append(entry)
+
+                if not dry_run and consolidated:
+                    keeper = db.query(Memory).filter(Memory.id == uuid.UUID(group[0]["id"])).first()
+                    if keeper:
+                        keeper.content = consolidated
+                        keeper.updated_at = datetime.datetime.now(datetime.UTC)
+                    for m in group[1:]:
+                        dup = db.query(Memory).filter(Memory.id == uuid.UUID(m["id"])).first()
+                        if dup:
+                            dup.state = MemoryState.archived
+                            dup.archived_at = datetime.datetime.now(datetime.UTC)
+
+            if not dry_run:
+                db.commit()
+
+            return json.dumps({
+                "status": "dry_run" if dry_run else "consolidated",
+                "groups": results,
+                "total_groups": len(results),
+            }, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error consolidating: {e}"
+
+
+@mcp.tool(description="Check if a text contradicts any existing memories. Useful before adding a memory that might conflict with stored knowledge.")
+async def check_contradiction(text: str) -> str:
+    """
+    Args:
+        text: The new memory text to check for contradictions against existing memories.
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            recent = (
+                db.query(Memory)
+                .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+                .order_by(Memory.updated_at.desc())
+                .limit(50)
+                .all()
+            )
+            existing = [{"id": str(m.id), "content": m.content} for m in recent]
+
+            from app.utils.intelligence import detect_contradiction
+            result = await asyncio.to_thread(detect_contradiction, text, existing)
+            return json.dumps(result, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error checking contradiction: {e}"
+
+
 @mcp.tool(description="Export a structured summary of the user's memories grouped by category. Useful for building user profiles or reviewing stored knowledge.")
 async def export_memories(format: str = "json") -> str:
     """

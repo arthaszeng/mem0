@@ -137,10 +137,10 @@ MCP 工具集追平 REST API — 更新、归档、结构化导出
 - [x] **Archive / Restore Tools** — archive_memories + restore_memories，MCP 端批量归档和恢复
 - [x] **Structured Export** — export_memories(format) 支持 JSON 和 text 两种格式，按 category 分组导出
 
-## v1.3 | Intelligence | upcoming | 远期 | zap
+## v1.3 | Intelligence | completed | 2026-03 | zap
 
 记忆系统从被动存储走向主动智能
 
-- [ ] **Memory Consolidation** — 定期扫描相似记忆，LLM 自动合并冗余
-- [ ] **Contradiction Detection** — 写入时检测矛盾，自动以最新为准更新旧记忆
-- [ ] **Memory Insights** — 用户画像摘要 + 主题趋势分析 + 知识覆盖度
+- [x] **Memory Consolidation** — MCP consolidate_memories 工具，SequenceMatcher 发现相似记忆 + LLM 合并，支持 dry_run
+- [x] **Contradiction Detection** — MCP check_contradiction 工具，LLM 对比新记忆与已有记忆检测冲突
+- [ ] **Memory Insights** — 用户画像摘要 + 主题趋势分析 + 知识覆盖度（延至 v2.x）
