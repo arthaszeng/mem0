@@ -13,7 +13,7 @@ alwaysApply: false
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `add_memories` | `text: str, infer: bool=True, instructions: str=""` | 写入记忆，触发后台分类。`infer=False` 跳过 LLM 提取直接存储；`instructions` 覆盖全局提取规则 |
-| `search_memory` | `query: string` | 语义搜索 |
+| `search_memory` | `query: str, limit: int=100, categories: str="", memory_type: str=""` | 混合搜索（向量+关键词+域增强），支持 category/type 过滤 |
 | `list_memories` | 无 | 列出全部（慎用） |
 | `delete_memories` | `memory_ids: list[str]` | 按 ID 删除 |
 | `delete_all_memories` | 无 | 清空全部（危险） |

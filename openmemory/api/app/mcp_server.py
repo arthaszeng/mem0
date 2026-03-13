@@ -338,7 +338,19 @@ async def add_memories(
 
 
 @mcp.tool(description="Search through stored memories. This method is called EVERYTIME the user asks anything.")
-async def search_memory(query: str) -> str:
+async def search_memory(
+    query: str,
+    limit: int = 100,
+    categories: str = "",
+    memory_type: str = "",
+) -> str:
+    """
+    Args:
+        query: The search query string.
+        limit: Maximum number of results to return (default 100).
+        categories: Comma-separated category names to filter by (e.g. "architecture,bugfix").
+        memory_type: Filter by memory type: "fact", "preference", "session", or "episodic".
+    """
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
     if not uid:
@@ -350,6 +362,10 @@ async def search_memory(query: str) -> str:
     if not memory_client:
         return "Error: Memory system is currently unavailable. Please try again later."
 
+    effective_limit = min(max(limit, 1), 500)
+    filter_categories = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
+    filter_memory_type = memory_type.strip() if memory_type else ""
+
     try:
         db = SessionLocal()
         try:
@@ -359,6 +375,7 @@ async def search_memory(query: str) -> str:
             user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
             accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
 
+            # --- Vector search ---
             qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=uid))]
             if project_id:
                 qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=project_id)))
@@ -370,7 +387,7 @@ async def search_memory(query: str) -> str:
                     collection_name=memory_client.vector_store.collection_name,
                     query=emb,
                     query_filter=query_filter,
-                    limit=100,
+                    limit=effective_limit,
                 ).points
 
             hits = await asyncio.to_thread(_do_search)
@@ -401,9 +418,7 @@ async def search_memory(query: str) -> str:
                     .filter(
                         Memory.user_id == user.id,
                         Memory.state == MemoryState.active,
-                        Memory.metadata_.op("->>")(  # JSON extract "domain"
-                            "domain"
-                        ) == matched_domain,
+                        Memory.metadata_.op("->>")("domain") == matched_domain,
                     )
                     .order_by(Memory.updated_at.desc())
                     .limit(50)
@@ -422,8 +437,60 @@ async def search_memory(query: str) -> str:
                         "hash": None,
                         "created_at": dm.created_at.isoformat() if dm.created_at else None,
                         "updated_at": dm.updated_at.isoformat() if dm.updated_at else None,
-                        "score": 0.5,  # domain-match baseline score
+                        "score": 0.5,
                     })
+
+            # --- Keyword search (SQLite LIKE) ---
+            kw_q = (
+                db.query(Memory)
+                .filter(
+                    Memory.user_id == user.id,
+                    Memory.state == MemoryState.active,
+                    Memory.content.ilike(f"%{query}%"),
+                )
+            )
+            if project_id:
+                kw_q = kw_q.filter(Memory.project_id == project_id)
+            kw_memories = kw_q.order_by(Memory.updated_at.desc()).limit(effective_limit).all()
+            for km in kw_memories:
+                mid = str(km.id)
+                if mid in seen_ids:
+                    continue
+                if allowed and mid not in allowed:
+                    continue
+                seen_ids.add(mid)
+                results.append({
+                    "id": mid,
+                    "memory": km.content,
+                    "hash": None,
+                    "created_at": km.created_at.isoformat() if km.created_at else None,
+                    "updated_at": km.updated_at.isoformat() if km.updated_at else None,
+                    "score": 0.4,
+                })
+
+            # --- Post-filters: categories and memory_type ---
+            if filter_categories or filter_memory_type:
+                filtered = []
+                for r in results:
+                    try:
+                        mem = db.query(Memory).filter(Memory.id == uuid.UUID(r["id"])).first()
+                    except (ValueError, AttributeError):
+                        mem = None
+                    if not mem:
+                        filtered.append(r)
+                        continue
+                    if filter_memory_type and mem.memory_type != filter_memory_type:
+                        continue
+                    if filter_categories:
+                        mem_cats = {c.name for c in mem.categories}
+                        if not mem_cats.intersection(filter_categories):
+                            continue
+                    filtered.append(r)
+                results = filtered
+
+            # Sort by score descending, truncate to limit
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+            results = results[:effective_limit]
 
             for r in results:
                 if r.get("id"):
