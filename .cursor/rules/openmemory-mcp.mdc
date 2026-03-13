@@ -17,6 +17,10 @@ alwaysApply: false
 | `list_memories` | 无 | 列出全部（慎用） |
 | `delete_memories` | `memory_ids: list[str]` | 按 ID 删除 |
 | `delete_all_memories` | 无 | 清空全部（危险） |
+| `update_memory` | `memory_id: str, new_content: str` | 更新记忆内容，触发重分类+实体提取 |
+| `archive_memories` | `memory_ids: list[str]` | 批量归档记忆 |
+| `restore_memories` | `memory_ids: list[str]` | 恢复已归档记忆 |
+| `export_memories` | `format: str="json"` | 结构化导出（json/text），按 category 分组 |
 | `search_entities` | `query: str, limit: int=20` | 在知识图谱中搜索实体及其关系 |
 | `list_graph_entities` | `limit: int=100` | 列出知识图谱中所有实体 |
 

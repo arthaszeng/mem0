@@ -790,6 +790,143 @@ async def delete_all_memories() -> str:
         return f"Error deleting memories: {e}"
 
 
+@mcp.tool(description="Update the content of an existing memory by its ID. Use when the user corrects or refines a previously stored memory.")
+async def update_memory(memory_id: str, new_content: str) -> str:
+    """
+    Args:
+        memory_id: The UUID string of the memory to update.
+        new_content: The new content to replace the existing memory text.
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    memory_client = get_memory_client_safe()
+    if not memory_client:
+        return "Error: Memory system is currently unavailable. Please try again later."
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            mem = db.query(Memory).filter(Memory.id == uuid.UUID(memory_id)).first()
+            if not mem:
+                return f"Error: Memory {memory_id} not found"
+            if mem.user_id != user.id:
+                return "Error: Cannot update another user's memory"
+            if not check_memory_access_permissions(db, mem, app.id):
+                return "Error: Access denied"
+
+            old_content = mem.content
+            mem.content = sanitize_text(new_content)
+            mem.updated_at = datetime.datetime.now(datetime.UTC)
+
+            db.add(MemoryAccessLog(
+                memory_id=mem.id, app_id=app.id,
+                access_type="update",
+                metadata_={"old_content": old_content[:200]},
+            ))
+            db.commit()
+
+            try:
+                _run_categorization_in_background(mem.id, mem.content)
+                _run_entity_extraction_in_background(mem.id, mem.content)
+            except Exception:
+                pass
+
+            return json.dumps({"status": "updated", "memory_id": memory_id})
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error updating memory: {e}"
+
+
+@mcp.tool(description="Archive memories by their IDs. Archived memories are hidden from search but can be restored later.")
+async def archive_memories(memory_ids: list[str]) -> str:
+    """
+    Args:
+        memory_ids: List of memory UUID strings to archive.
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            archived = 0
+            for mid_str in memory_ids:
+                try:
+                    mid = uuid.UUID(mid_str)
+                except ValueError:
+                    continue
+                mem = db.query(Memory).filter(Memory.id == mid, Memory.user_id == user.id).first()
+                if mem and mem.state == MemoryState.active:
+                    mem.state = MemoryState.archived
+                    mem.archived_at = datetime.datetime.now(datetime.UTC)
+                    db.add(MemoryStatusHistory(
+                        memory_id=mid, changed_by=user.id,
+                        old_state=MemoryState.active, new_state=MemoryState.archived,
+                    ))
+                    archived += 1
+            db.commit()
+            return f"Archived {archived} memories"
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error archiving memories: {e}"
+
+
+@mcp.tool(description="Restore previously archived memories back to active state.")
+async def restore_memories(memory_ids: list[str]) -> str:
+    """
+    Args:
+        memory_ids: List of memory UUID strings to restore.
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            restored = 0
+            for mid_str in memory_ids:
+                try:
+                    mid = uuid.UUID(mid_str)
+                except ValueError:
+                    continue
+                mem = db.query(Memory).filter(Memory.id == mid, Memory.user_id == user.id).first()
+                if mem and mem.state == MemoryState.archived:
+                    mem.state = MemoryState.active
+                    mem.archived_at = None
+                    db.add(MemoryStatusHistory(
+                        memory_id=mid, changed_by=user.id,
+                        old_state=MemoryState.archived, new_state=MemoryState.active,
+                    ))
+                    restored += 1
+            db.commit()
+            return f"Restored {restored} memories"
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error restoring memories: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Domain management tools (does NOT change existing tool interfaces)
 # ---------------------------------------------------------------------------
@@ -861,6 +998,73 @@ async def run_agent_task(prompt: str) -> str:
         return "LangGraph agent service is not running. Start it first."
     except Exception as e:
         return f"Agent error: {e}"
+
+
+@mcp.tool(description="Export a structured summary of the user's memories grouped by category. Useful for building user profiles or reviewing stored knowledge.")
+async def export_memories(format: str = "json") -> str:
+    """
+    Args:
+        format: Output format — "json" (structured) or "text" (human-readable summary).
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            memories = (
+                db.query(Memory)
+                .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+                .order_by(Memory.updated_at.desc())
+                .limit(500)
+                .all()
+            )
+
+            by_category = {}
+            uncategorized = []
+            for mem in memories:
+                cats = [c.name for c in mem.categories]
+                entry = {
+                    "id": str(mem.id),
+                    "content": mem.content,
+                    "memory_type": mem.memory_type,
+                    "agent_id": mem.agent_id,
+                    "created_at": mem.created_at.isoformat() if mem.created_at else None,
+                }
+                if cats:
+                    for cat in cats:
+                        by_category.setdefault(cat, []).append(entry)
+                else:
+                    uncategorized.append(entry)
+
+            if format == "text":
+                lines = [f"Memory Export for {uid} ({len(memories)} memories)\n"]
+                for cat, items in sorted(by_category.items()):
+                    lines.append(f"\n## {cat} ({len(items)})")
+                    for item in items:
+                        lines.append(f"- {item['content']}")
+                if uncategorized:
+                    lines.append(f"\n## Uncategorized ({len(uncategorized)})")
+                    for item in uncategorized:
+                        lines.append(f"- {item['content']}")
+                return "\n".join(lines)
+
+            return json.dumps({
+                "user_id": uid,
+                "total": len(memories),
+                "categories": by_category,
+                "uncategorized": uncategorized,
+            }, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error exporting memories: {e}"
 
 
 @mcp.tool(description="Search the knowledge graph for entities (people, projects, technologies) and their relationships. Use when the user asks about connections between concepts or wants to explore related knowledge.")
