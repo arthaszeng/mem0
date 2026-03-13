@@ -23,7 +23,7 @@ import logging
 import uuid
 
 from app.database import SessionLocal
-from app.models import Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
+from app.models import AgentInstruction, Config, Memory, MemoryAccessLog, MemoryState, MemoryStatusHistory
 from app.utils.db import get_user_and_app
 from app.utils.memory import get_memory_client
 from app.utils.categorization import match_domain_by_keywords
@@ -129,17 +129,33 @@ async def _memory_write_worker():
                     project_id, _ = _resolve_project(db, user.id)
                 finally:
                     project_slug_var.reset(pslug_token)
+
+                agent_instructions = None
+                if task_agent_id:
+                    q = db.query(AgentInstruction).filter(
+                        AgentInstruction.user_id == user.id,
+                        AgentInstruction.agent_id == task_agent_id,
+                    )
+                    if project_id:
+                        q = q.filter(AgentInstruction.project_id == uuid.UUID(project_id))
+                    else:
+                        q = q.filter(AgentInstruction.project_id.is_(None))
+                    row = q.first()
+                    if row:
+                        agent_instructions = row.instructions
             finally:
                 db.close()
+
+            effective_instructions = task_instructions or agent_instructions or ""
 
             qdrant_meta = {"source_app": "openmemory", "mcp_client": client_name}
             if project_id:
                 qdrant_meta["project_id"] = project_id
 
             saved_prompt = None
-            if task_instructions:
+            if effective_instructions:
                 saved_prompt = memory_client.config.custom_fact_extraction_prompt
-                memory_client.config.custom_fact_extraction_prompt = task_instructions
+                memory_client.config.custom_fact_extraction_prompt = effective_instructions
 
             try:
                 response = await asyncio.to_thread(
@@ -190,6 +206,10 @@ async def _memory_write_worker():
                                 memory.expires_at = parsed_expires
                             if task_memory_type:
                                 memory.memory_type = task_memory_type
+                            if task_agent_id:
+                                memory.agent_id = task_agent_id
+                            if task_run_id:
+                                memory.run_id = task_run_id
 
                             db.add(MemoryStatusHistory(
                                 memory_id=memory_id,
@@ -560,8 +580,11 @@ async def search_memory(
                     filtered.append(r)
                 results = filtered
 
-            # Sort by score descending, truncate to limit
             results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+            from app.utils.reranker import rerank, filter_by_relevance
+            results = await asyncio.to_thread(rerank, query, results, effective_limit)
+            results = await filter_by_relevance(query, results)
             results = results[:effective_limit]
 
             for r in results:
@@ -1004,6 +1027,98 @@ async def run_agent_task(prompt: str) -> str:
         return f"Agent error: {e}"
 
 
+def _get_global_custom_instructions(db) -> str:
+    db_config = db.query(Config).filter(Config.key == "main").first()
+    if db_config and isinstance(db_config.value, dict):
+        ci = db_config.value.get("openmemory", {}).get("custom_instructions")
+        if ci:
+            return ci
+    from app.utils.prompts import build_fact_extraction_prompt
+    return build_fact_extraction_prompt()
+
+
+@mcp.tool(description="Get custom instructions for a specific AI agent. Returns agent-specific rules for memory extraction.")
+async def get_agent_instructions(agent_id: str = "") -> str:
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, _ = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
+
+            if agent_id:
+                q = db.query(AgentInstruction).filter(
+                    AgentInstruction.user_id == user.id,
+                    AgentInstruction.agent_id == agent_id,
+                )
+                if project_id:
+                    q = q.filter(AgentInstruction.project_id == uuid.UUID(project_id))
+                else:
+                    q = q.filter(AgentInstruction.project_id.is_(None))
+                row = q.first()
+                if row:
+                    return row.instructions
+
+            return _get_global_custom_instructions(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error getting agent instructions: {e}"
+
+
+@mcp.tool(description="Set custom instructions for a specific AI agent. These override global instructions when this agent writes memories.")
+async def set_agent_instructions(agent_id: str, instructions: str) -> str:
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, _ = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
+
+            project_uuid = uuid.UUID(project_id) if project_id else None
+            existing = db.query(AgentInstruction).filter(
+                AgentInstruction.user_id == user.id,
+                AgentInstruction.agent_id == agent_id,
+            )
+            if project_uuid is not None:
+                existing = existing.filter(AgentInstruction.project_id == project_uuid)
+            else:
+                existing = existing.filter(AgentInstruction.project_id.is_(None))
+            row = existing.first()
+
+            if row:
+                row.instructions = instructions
+                row.updated_at = datetime.datetime.now(datetime.UTC)
+            else:
+                row = AgentInstruction(
+                    user_id=user.id,
+                    project_id=project_uuid,
+                    agent_id=agent_id,
+                    instructions=instructions,
+                )
+                db.add(row)
+            db.commit()
+            return json.dumps({"status": "ok", "agent_id": agent_id})
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error setting agent instructions: {e}"
+
+
 @mcp.tool(description="Find and consolidate similar/duplicate memories. Scans recent memories, identifies near-duplicates, and merges them into concise consolidated entries. Call periodically to keep memory clean.")
 async def consolidate_memories(dry_run: bool = True) -> str:
     """
@@ -1324,5 +1439,9 @@ def setup_mcp_server(app: FastAPI):
         from app.utils.ttl_cleanup import ttl_cleanup_loop
         asyncio.create_task(ttl_cleanup_loop())
         logging.info("TTL cleanup loop started")
+
+        from app.utils.archive_policy import archive_policy_loop
+        asyncio.create_task(archive_policy_loop())
+        logging.info("Archive policy loop started")
 
     app.include_router(mcp_router)

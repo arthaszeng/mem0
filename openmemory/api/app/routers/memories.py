@@ -7,7 +7,9 @@ from uuid import UUID
 from app.database import get_db
 from app.models import (
     AccessControl,
+    AgentInstruction,
     App,
+    ArchivePolicy,
     Category,
     Memory,
     MemoryAccessLog,
@@ -374,6 +376,100 @@ async def get_domains(
     return {"domains": domains, "total": len(domains)}
 
 
+def _require_superadmin(auth: AuthenticatedUser = Depends(get_authenticated_user)) -> AuthenticatedUser:
+    if not auth.is_superadmin:
+        raise HTTPException(403, "Superadmin required")
+    return auth
+
+
+class ArchivePolicyCreate(BaseModel):
+    criteria_type: str
+    criteria_id: Optional[str] = None
+    days_to_archive: int
+
+
+class ArchivePolicyResponse(BaseModel):
+    id: str
+    criteria_type: str
+    criteria_id: Optional[str]
+    days_to_archive: int
+    created_at: str
+
+
+@router.get("/archive-policies", response_model=List[ArchivePolicyResponse])
+async def list_archive_policies(
+    auth: AuthenticatedUser = Depends(_require_superadmin),
+    db: Session = Depends(get_db),
+):
+    policies = db.query(ArchivePolicy).order_by(ArchivePolicy.created_at.desc()).all()
+    return [
+        ArchivePolicyResponse(
+            id=str(p.id),
+            criteria_type=p.criteria_type,
+            criteria_id=str(p.criteria_id) if p.criteria_id else None,
+            days_to_archive=p.days_to_archive,
+            created_at=p.created_at.isoformat() if p.created_at else "",
+        )
+        for p in policies
+    ]
+
+
+@router.post("/archive-policies", response_model=ArchivePolicyResponse)
+async def create_archive_policy(
+    request: ArchivePolicyCreate,
+    auth: AuthenticatedUser = Depends(_require_superadmin),
+    db: Session = Depends(get_db),
+):
+    if request.criteria_type not in ("global", "app"):
+        raise HTTPException(400, "criteria_type must be 'global' or 'app'")
+    if request.criteria_type == "app" and not request.criteria_id:
+        raise HTTPException(400, "criteria_id required for app policy")
+    if request.criteria_type == "global" and request.criteria_id:
+        raise HTTPException(400, "criteria_id must be null for global policy")
+    if request.days_to_archive < 1:
+        raise HTTPException(400, "days_to_archive must be >= 1")
+
+    policy = ArchivePolicy(
+        criteria_type=request.criteria_type,
+        criteria_id=request.criteria_id,
+        days_to_archive=request.days_to_archive,
+    )
+    db.add(policy)
+    db.commit()
+    db.refresh(policy)
+    return ArchivePolicyResponse(
+        id=str(policy.id),
+        criteria_type=policy.criteria_type,
+        criteria_id=str(policy.criteria_id) if policy.criteria_id else None,
+        days_to_archive=policy.days_to_archive,
+        created_at=policy.created_at.isoformat() if policy.created_at else "",
+    )
+
+
+@router.post("/archive-policies/apply")
+async def apply_archive_policies_endpoint(
+    auth: AuthenticatedUser = Depends(_require_superadmin),
+    db: Session = Depends(get_db),
+):
+    from app.utils.archive_policy import apply_archive_policies
+    count = apply_archive_policies(session=db)
+    return {"archived": count}
+
+
+@router.delete("/archive-policies/{policy_id}")
+async def delete_archive_policy(
+    policy_id: UUID,
+    auth: AuthenticatedUser = Depends(_require_superadmin),
+    db: Session = Depends(get_db),
+):
+    policy = db.query(ArchivePolicy).filter(ArchivePolicy.id == policy_id).first()
+    if not policy:
+        raise HTTPException(404, "Archive policy not found")
+    db.delete(policy)
+    db.commit()
+    return {"status": "deleted"}
+
+
 class CreateMemoryRequest(BaseModel):
     user_id: Optional[str] = None
     text: str
@@ -652,6 +748,145 @@ async def create_memory(
         }
 
 
+
+
+# --- Agent instructions (must be before /{memory_id}) ---
+
+class AgentInstructionUpdate(BaseModel):
+    instructions: str
+
+
+class AgentInstructionResponse(BaseModel):
+    agent_id: str
+    instructions: str
+    updated_at: str
+
+
+@router.get("/agent-instructions", response_model=List[AgentInstructionResponse])
+async def list_agent_instructions(
+    project_slug: Optional[str] = None,
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    pctx = resolve_project(auth_user, db, project_slug)
+    user = auth_user.db_user
+
+    q = db.query(AgentInstruction).filter(AgentInstruction.user_id == user.id)
+    if pctx:
+        q = q.filter(AgentInstruction.project_id == pctx.project_id)
+    else:
+        q = q.filter(AgentInstruction.project_id.is_(None))
+    rows = q.all()
+    return [
+        AgentInstructionResponse(
+            agent_id=r.agent_id,
+            instructions=r.instructions,
+            updated_at=r.updated_at.isoformat() if r.updated_at else "",
+        )
+        for r in rows
+    ]
+
+
+@router.get("/agent-instructions/{agent_id}", response_model=AgentInstructionResponse)
+async def get_agent_instruction(
+    agent_id: str,
+    project_slug: Optional[str] = None,
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    pctx = resolve_project(auth_user, db, project_slug)
+    user = auth_user.db_user
+
+    q = db.query(AgentInstruction).filter(
+        AgentInstruction.user_id == user.id,
+        AgentInstruction.agent_id == agent_id,
+    )
+    if pctx:
+        q = q.filter(AgentInstruction.project_id == pctx.project_id)
+    else:
+        q = q.filter(AgentInstruction.project_id.is_(None))
+    row = q.first()
+    if not row:
+        raise HTTPException(404, "Agent instructions not found")
+    return AgentInstructionResponse(
+        agent_id=row.agent_id,
+        instructions=row.instructions,
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+    )
+
+
+@router.put("/agent-instructions/{agent_id}", response_model=AgentInstructionResponse)
+async def put_agent_instructions(
+    agent_id: str,
+    request: AgentInstructionUpdate,
+    project_slug: Optional[str] = None,
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    pctx = resolve_project(auth_user, db, project_slug)
+    user = auth_user.db_user
+
+    project_id = pctx.project_id if pctx else None
+    q = db.query(AgentInstruction).filter(
+        AgentInstruction.user_id == user.id,
+        AgentInstruction.agent_id == agent_id,
+    )
+    if project_id is not None:
+        q = q.filter(AgentInstruction.project_id == project_id)
+    else:
+        q = q.filter(AgentInstruction.project_id.is_(None))
+    existing = q.first()
+
+    if existing:
+        existing.instructions = request.instructions
+        existing.updated_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(existing)
+        return AgentInstructionResponse(
+            agent_id=existing.agent_id,
+            instructions=existing.instructions,
+            updated_at=existing.updated_at.isoformat() if existing.updated_at else "",
+        )
+    row = AgentInstruction(
+        user_id=user.id,
+        project_id=project_id,
+        agent_id=agent_id,
+        instructions=request.instructions,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return AgentInstructionResponse(
+        agent_id=row.agent_id,
+        instructions=row.instructions,
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+    )
+
+
+@router.delete("/agent-instructions/{agent_id}")
+async def delete_agent_instructions(
+    agent_id: str,
+    project_slug: Optional[str] = None,
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    pctx = resolve_project(auth_user, db, project_slug)
+    user = auth_user.db_user
+
+    q = db.query(AgentInstruction).filter(
+        AgentInstruction.user_id == user.id,
+        AgentInstruction.agent_id == agent_id,
+    )
+    if pctx:
+        q = q.filter(AgentInstruction.project_id == pctx.project_id)
+    else:
+        q = q.filter(AgentInstruction.project_id.is_(None))
+    row = q.first()
+    if not row:
+        raise HTTPException(404, "Agent instructions not found")
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted"}
 
 
 # Get memory by ID
@@ -1291,6 +1526,44 @@ async def search_graph_entities(
     from app.utils.graph_store import search_entities
     results = await asyncio.to_thread(search_entities, query, limit)
     return {"entities": results, "total": len(results)}
+
+
+@entities_router.get("/graph")
+async def get_entities_graph(
+    limit: int = Query(50, ge=1, le=200),
+    project_slug: Optional[str] = Query(None),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Return full graph data (nodes + edges) for visualization."""
+    from app.utils.graph_store import get_full_graph
+
+    data = await asyncio.to_thread(get_full_graph, limit)
+
+    if project_slug:
+        pctx = resolve_project(auth, db, project_slug)
+        if pctx:
+            filters = [Memory.state == MemoryState.active, Memory.project_id == pctx.project_id]
+        else:
+            filters = [Memory.state == MemoryState.active, Memory.user_id == auth.db_user.id]
+        project_memory_ids = {str(r[0]) for r in db.query(Memory.id).filter(*filters).all()}
+        if project_memory_ids:
+            valid_nodes = {
+                n["id"] for n in data["nodes"]
+                if any(mid in project_memory_ids for mid in n.get("memory_ids", []))
+            }
+            data["edges"] = [
+                e for e in data["edges"]
+                if e.get("memory_id") in project_memory_ids
+                and e["source"] in valid_nodes
+                and e["target"] in valid_nodes
+            ]
+            data["nodes"] = [n for n in data["nodes"] if n["id"] in valid_nodes]
+
+    for n in data["nodes"]:
+        n.pop("memory_ids", None)
+
+    return data
 
 
 @router.get("/stats/types")

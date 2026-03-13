@@ -864,20 +864,27 @@ const memoryPlugin = {
               description: "Memory type classification",
             }),
           ),
+          agentId: Type.Optional(
+            Type.String({
+              description: "AI agent role identifier (e.g. 'openclaw', 'cursor'). Enables per-agent custom instructions.",
+            }),
+          ),
         }),
         async execute(_toolCallId, params) {
-          const { text, userId, longTerm = true, memoryType } = params as {
+          const { text, userId, longTerm = true, memoryType, agentId } = params as {
             text: string;
             userId?: string;
             metadata?: Record<string, unknown>;
             longTerm?: boolean;
             memoryType?: string;
+            agentId?: string;
           };
 
           try {
             const runId = !longTerm && currentSessionId ? currentSessionId : undefined;
             const addOpts = buildAddOptions(userId, runId);
             if (memoryType) (addOpts as any).memory_type = memoryType;
+            if (agentId) (addOpts as any).agent_id = agentId;
             const result = await provider.add(
               [{ role: "user", content: text }],
               addOpts,

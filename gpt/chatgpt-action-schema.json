@@ -3,7 +3,7 @@
   "info": {
     "title": "Arthas AI Platform (Private)",
     "description": "OpenMemory (personal memory system) + Concierge (Sanofi AI assistant) — private use only",
-    "version": "2.2.0"
+    "version": "2.3.0"
   },
   "servers": [
     {
@@ -372,6 +372,57 @@
           },
           "401": { "description": "No active Concierge session" },
           "502": { "description": "Concierge upstream error" }
+        }
+      }
+    },
+    "/api/v1/entities/graph": {
+      "get": {
+        "operationId": "getKnowledgeGraph",
+        "summary": "Get knowledge graph data",
+        "description": "Returns entity nodes and relationship edges for visualization. Entities are extracted from memories automatically.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 50, "maximum": 200 },
+            "description": "Maximum number of entity nodes to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Graph data with nodes and edges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "type": { "type": "string" },
+                          "memory_count": { "type": "integer" }
+                        }
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": { "type": "string" },
+                          "target": { "type": "string" },
+                          "relation": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

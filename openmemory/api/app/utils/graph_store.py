@@ -136,3 +136,51 @@ def list_entities(limit: int = 100) -> List[dict]:
     except Exception as e:
         logger.error("Graph list failed: %s", e)
         return []
+
+
+def get_full_graph(limit: int = 50) -> dict:
+    """Return full graph data (nodes + edges) for visualization."""
+    conn = _get_connection()
+    if not conn:
+        return {"nodes": [], "edges": []}
+
+    try:
+        rows = _query_rows(conn, f"MATCH (e:Entity) RETURN e.name, e.type, e.memory_ids LIMIT {limit}")
+        nodes = []
+        edges = []
+        seen_edges = set()
+
+        for row in rows:
+            name = row[0]
+            etype = row[1]
+            memory_ids = row[2] or []
+            nodes.append({
+                "id": name,
+                "type": etype or "unknown",
+                "memory_count": len(memory_ids),
+                "memory_ids": list(memory_ids),
+            })
+
+            ename = _escape(name)
+            rel_rows = _query_rows(
+                conn,
+                f"MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) WHERE a.name = '{ename}' RETURN b.name, r.relation, r.memory_id"
+            )
+            for rr in rel_rows:
+                target_name = rr[0]
+                relation = rr[1] or "related_to"
+                memory_id = rr[2] or ""
+                edge_key = (name, target_name, relation, memory_id)
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "source": name,
+                        "target": target_name,
+                        "relation": relation,
+                        "memory_id": memory_id,
+                    })
+
+        return {"nodes": nodes, "edges": edges}
+    except Exception as e:
+        logger.error("Graph get_full_graph failed: %s", e)
+        return {"nodes": [], "edges": []}

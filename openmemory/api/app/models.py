@@ -235,12 +235,27 @@ class ArchivePolicy(Base):
     __tablename__ = "archive_policies"
     id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
     criteria_type = Column(String, nullable=False, index=True)
-    criteria_id = Column(UUID, nullable=True, index=True)
+    criteria_id = Column(String, nullable=True, index=True)
     days_to_archive = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=get_current_utc_time, index=True)
 
     __table_args__ = (
         Index('idx_policy_criteria', 'criteria_type', 'criteria_id'),
+    )
+
+
+class AgentInstruction(Base):
+    __tablename__ = "agent_instructions"
+    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(UUID, ForeignKey("projects.id"), nullable=True, index=True)
+    agent_id = Column(String, nullable=False, index=True)
+    instructions = Column(String, nullable=False)
+    created_at = Column(DateTime, default=get_current_utc_time, index=True)
+    updated_at = Column(DateTime, default=get_current_utc_time, onupdate=get_current_utc_time)
+
+    __table_args__ = (
+        Index('idx_agent_instr_lookup', 'user_id', 'project_id', 'agent_id', unique=True),
     )
 
 

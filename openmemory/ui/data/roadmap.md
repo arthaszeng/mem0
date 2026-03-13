@@ -78,7 +78,7 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **OAuth Client Secret** — 动态注册支持 client_secret 生成，兼容 ChatGPT 等需要密钥的 OAuth 客户端
 - [x] **Token 端点 Form 兼容** — /auth/token 同时支持 JSON 和 x-www-form-urlencoded，符合 OAuth2 标准
 
-## v0.7 | Memory Quality | in_progress | 进行中 | brain
+## v0.7 | Memory Quality | completed | 2026-03 | brain
 
 记忆质量升级 — 测试基线 + 版本管理 + 更精准的提取
 
@@ -96,7 +96,7 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **Memory Type 分层** — session / preference / fact / episodic 四类标签，MCP add_memories 支持 memory_type 参数
 - [x] **MCP 生命周期参数** — add_memories 新增 expires_at 和 memory_type，支持 ISO 8601 过期时间
 - [x] **Alembic 迁移** — v0_8_lifecycle 迁移添加 expires_at / memory_type 列和索引
-- [ ] **ArchivePolicy 自动化** — 按 app / category / domain 设置差异化归档策略（延至 v1.x）
+- [x] **ArchivePolicy 自动化** — REST API + 后台每小时自动执行归档策略，支持 global / app 两种粒度
 
 ## v0.9 | Advanced Retrieval | completed | 2026-03 | search
 
@@ -106,8 +106,8 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **MCP Search 增强** — search_memory 支持 limit / categories / memory_type 参数，结果可精确过滤
 - [x] **Category 过滤** — 按逗号分隔的 category 名称过滤搜索结果
 - [x] **Memory Type 过滤** — 按 fact / preference / session / episodic 类型过滤
-- [ ] **Reranking 重排序** — Jina / Cohere Reranker 对候选重排（延至 v1.x）
-- [ ] **Memory Filtering** — LLM 判断搜索结果与查询的高度相关性（延至 v1.x）
+- [x] **Reranking 重排序** — 支持 Jina / Cohere / cross-encoder 三种后端，环境变量配置，搜索自动集成
+- [x] **Memory Filtering** — LLM 批量相关性打分 0–1，可配置阈值过滤低相关结果
 
 ## v1.0 | Graph Memory | completed | 2026-03 | git-branch
 
@@ -117,8 +117,8 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **实体关系提取** — gpt-4o-mini 自动提取 person/project/technology/organization/concept/place 实体及关系
 - [x] **后台自动建图** — 写入记忆时后台线程自动提取实体写入 Kuzu 图
 - [x] **MCP Entity Tools** — search_entities + list_graph_entities 两个新 MCP 工具
-- [ ] **Graph-Enhanced Search** — search_memory 结果融合图谱关联实体（延至 v1.1）
-- [ ] **知识图谱可视化** — 力导向图 UI，节点按类型着色（延至 v1.1）
+- [x] **Graph-Enhanced Search** — search_memory 结果融合图谱关联实体（v1.1 已实现，score 0.6 融合）
+- [x] **知识图谱可视化** — 力导向图 UI，节点按实体类型着色，Dashboard 集成
 
 ## v1.1 | Entity Scoping | completed | 2026-03 | layers
 
@@ -127,7 +127,7 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **agent_id + run_id** — Memory 模型新增字段 + 索引，MCP add_memories 支持传入
 - [x] **agent_id 搜索过滤** — search_memory 支持 agent_id 参数，按 AI 角色过滤结果
 - [x] **Graph-Enhanced Search** — search_memory 自动查询 Kuzu 图谱关联实体的记忆，融入搜索结果 (score 0.6)
-- [ ] **Agent Memory** — 每个 AI 角色独立的 Custom Instructions 和个性记忆（延至 v1.3）
+- [x] **Agent Memory** — 每个 AI 角色独立 Custom Instructions，DB 持久化 + MCP/REST API 管理
 
 ## v1.2 | MCP Complete | completed | 2026-03 | wrench
 

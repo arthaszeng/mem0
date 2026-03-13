@@ -3,7 +3,7 @@
     "info": {
       "title": "OpenMemory",
       "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
-      "version": "1.4.0"
+      "version": "1.5.0"
     },
     "servers": [
       {
