@@ -489,7 +489,11 @@ async def search_memory(
                 )
             )
             if project_id:
-                kw_q = kw_q.filter(Memory.project_id == project_id)
+                try:
+                    pid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+                except (ValueError, AttributeError):
+                    pid = project_id
+                kw_q = kw_q.filter(Memory.project_id == pid)
             kw_memories = kw_q.order_by(Memory.updated_at.desc()).limit(effective_limit).all()
             for km in kw_memories:
                 mid = str(km.id)
