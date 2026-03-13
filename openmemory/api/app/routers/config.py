@@ -43,6 +43,7 @@ class VectorStoreProvider(BaseModel):
 
 class OpenMemoryConfig(BaseModel):
     custom_instructions: Optional[str] = Field(None, description="Custom instructions for memory management and fact extraction")
+    confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence threshold (0.0-1.0) for fact extraction; facts below this threshold are discarded")
 
 class Mem0Config(BaseModel):
     llm: Optional[LLMProvider] = None

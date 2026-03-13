@@ -252,6 +252,7 @@ def get_memory_client(custom_instructions: str = None):
         config = get_default_memory_config()
 
         db_custom_instructions = None
+        db_json_config = {}
 
         try:
             db = SessionLocal()
@@ -259,6 +260,7 @@ def get_memory_client(custom_instructions: str = None):
 
             if db_config:
                 json_config = db_config.value
+                db_json_config = json_config
 
                 if "openmemory" in json_config and "custom_instructions" in json_config["openmemory"]:
                     db_custom_instructions = json_config["openmemory"]["custom_instructions"]
@@ -298,12 +300,18 @@ def get_memory_client(custom_instructions: str = None):
 
         from app.utils.prompts import build_fact_extraction_prompt
 
-        # Always use the dynamically built prompt so domain registry
-        # changes and security rules take effect without restart.
-        # Manual custom_instructions from DB/param can override if set.
+        confidence_threshold = None
+        try:
+            ct = db_json_config.get("openmemory", {}).get("confidence_threshold")
+            if ct is not None:
+                confidence_threshold = float(ct)
+        except (TypeError, ValueError):
+            pass
+
         instructions_to_use = custom_instructions or db_custom_instructions
         config["custom_fact_extraction_prompt"] = (
-            instructions_to_use or build_fact_extraction_prompt()
+            instructions_to_use
+            or build_fact_extraction_prompt(confidence_threshold=confidence_threshold)
         )
 
         config["custom_update_memory_prompt"] = COMPACT_UPDATE_MEMORY_PROMPT
