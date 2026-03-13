@@ -32,6 +32,8 @@ import {
   setSelectedApps,
   setSelectedCategories,
   setSelectedDomains,
+  setSelectedMemoryType,
+  setSelectedAgentId,
   setShowArchived,
   clearFilters,
 } from "@/store/filtersSlice";
@@ -64,6 +66,8 @@ export default function FilterComponent() {
     string[]
   >([]);
   const [tempSelectedDomains, setTempSelectedDomains] = useState<string[]>([]);
+  const [tempMemoryType, setTempMemoryType] = useState("");
+  const [tempAgentId, setTempAgentId] = useState("");
   const [showArchived, setShowArchived] = useState(false);
 
   const apps = useSelector((state: RootState) => state.apps.apps);
@@ -86,6 +90,8 @@ export default function FilterComponent() {
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
       setTempSelectedDomains(filters.selectedDomains);
+      setTempMemoryType(filters.selectedMemoryType || "");
+      setTempAgentId(filters.selectedAgentId || "");
       setShowArchived(filters.showArchived || false);
     }
   }, [isOpen, filters]);
@@ -136,6 +142,8 @@ export default function FilterComponent() {
     setTempSelectedApps([]);
     setTempSelectedCategories([]);
     setTempSelectedDomains([]);
+    setTempMemoryType("");
+    setTempAgentId("");
     setShowArchived(false);
     dispatch(clearFilters());
     resetPageToFirst();
@@ -146,6 +154,8 @@ export default function FilterComponent() {
     dispatch(setSelectedApps(tempSelectedApps));
     dispatch(setSelectedCategories(tempSelectedCategories));
     dispatch(setSelectedDomains(tempSelectedDomains));
+    dispatch(setSelectedMemoryType(tempMemoryType));
+    dispatch(setSelectedAgentId(tempAgentId));
     dispatch(setShowArchived(showArchived));
     resetPageToFirst();
   };
@@ -156,6 +166,8 @@ export default function FilterComponent() {
       setTempSelectedApps(filters.selectedApps);
       setTempSelectedCategories(filters.selectedCategories);
       setTempSelectedDomains(filters.selectedDomains);
+      setTempMemoryType(filters.selectedMemoryType || "");
+      setTempAgentId(filters.selectedAgentId || "");
       setShowArchived(filters.showArchived || false);
     }
   };
@@ -173,12 +185,16 @@ export default function FilterComponent() {
     filters.selectedApps.length > 0 ||
     filters.selectedCategories.length > 0 ||
     filters.selectedDomains.length > 0 ||
+    !!filters.selectedMemoryType ||
+    !!filters.selectedAgentId ||
     filters.showArchived;
 
   const hasTempFilters =
     tempSelectedApps.length > 0 ||
     tempSelectedCategories.length > 0 ||
     tempSelectedDomains.length > 0 ||
+    !!tempMemoryType ||
+    !!tempAgentId ||
     showArchived;
 
   return (
@@ -200,6 +216,8 @@ export default function FilterComponent() {
                 {filters.selectedApps.length +
                   filters.selectedCategories.length +
                   filters.selectedDomains.length +
+                  (filters.selectedMemoryType ? 1 : 0) +
+                  (filters.selectedAgentId ? 1 : 0) +
                   (filters.showArchived ? 1 : 0)}
               </Badge>
             )}
@@ -212,28 +230,40 @@ export default function FilterComponent() {
             </DialogTitle>
           </DialogHeader>
           <Tabs defaultValue="apps" className="w-full">
-            <TabsList className="grid grid-cols-4 bg-zinc-800">
+            <TabsList className="grid grid-cols-6 bg-zinc-800">
               <TabsTrigger
                 value="apps"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-zinc-700 text-xs"
               >
                 Apps
               </TabsTrigger>
               <TabsTrigger
                 value="categories"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-zinc-700 text-xs"
               >
                 Categories
               </TabsTrigger>
               <TabsTrigger
                 value="domains"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-zinc-700 text-xs"
               >
                 Domains
               </TabsTrigger>
               <TabsTrigger
+                value="type"
+                className="data-[state=active]:bg-zinc-700 text-xs"
+              >
+                Type
+              </TabsTrigger>
+              <TabsTrigger
+                value="agent"
+                className="data-[state=active]:bg-zinc-700 text-xs"
+              >
+                Agent
+              </TabsTrigger>
+              <TabsTrigger
                 value="archived"
-                className="data-[state=active]:bg-zinc-700"
+                className="data-[state=active]:bg-zinc-700 text-xs"
               >
                 Archived
               </TabsTrigger>
@@ -360,6 +390,42 @@ export default function FilterComponent() {
                     </Label>
                   </div>
                 ))}
+              </div>
+            </TabsContent>
+            <TabsContent value="type" className="mt-4">
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                {["", "fact", "preference", "session", "episodic"].map((t) => (
+                  <div key={t || "all"} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`type-${t || "all"}`}
+                      checked={tempMemoryType === t}
+                      onCheckedChange={() => setTempMemoryType(t)}
+                      className="border-zinc-600 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                    />
+                    <Label
+                      htmlFor={`type-${t || "all"}`}
+                      className="text-sm font-normal text-zinc-300 cursor-pointer"
+                    >
+                      {t || "All Types"}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </TabsContent>
+            <TabsContent value="agent" className="mt-4">
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={tempAgentId}
+                    onChange={(e) => setTempAgentId(e.target.value)}
+                    placeholder="Filter by agent ID (e.g. cursor, chatgpt)"
+                    className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-sm text-zinc-300 placeholder:text-zinc-500 focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Leave empty to show all agents.
+                </p>
               </div>
             </TabsContent>
             <TabsContent value="archived" className="mt-4">

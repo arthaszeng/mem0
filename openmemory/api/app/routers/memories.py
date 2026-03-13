@@ -109,6 +109,9 @@ class SearchMemoryRequest(BaseModel):
     limit: int = 100
     threshold: float = 0.0
     project_slug: Optional[str] = None
+    categories: Optional[List[str]] = None
+    memory_type: Optional[str] = None
+    agent_id: Optional[str] = None
 
 
 @router.post("/search")
@@ -127,6 +130,10 @@ async def search_memories_semantic(
     qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=auth.username))]
     if pctx:
         qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=str(pctx.project_id))))
+    if request.memory_type:
+        qdrant_filters.append(FieldCondition(key="memory_type", match=MatchValue(value=request.memory_type)))
+    if request.agent_id:
+        qdrant_filters.append(FieldCondition(key="agent_id", match=MatchValue(value=request.agent_id)))
     query_filter = Filter(must=qdrant_filters)
 
     def _do_search():
@@ -188,6 +195,19 @@ async def search_memories_semantic(
                 "metadata": dm.metadata_ or {},
             })
 
+    if request.categories:
+        result_ids = [r["id"] for r in results]
+        if result_ids:
+            cat_mem_ids = set()
+            cat_q = (
+                db.query(Memory.id)
+                .join(Memory.categories)
+                .filter(Memory.id.in_([UUID(rid) for rid in result_ids]))
+                .filter(Category.name.in_(request.categories))
+            )
+            cat_mem_ids = {str(row[0]) for row in cat_q.all()}
+            results = [r for r in results if r["id"] in cat_mem_ids]
+
     return {"results": results}
 
 
@@ -208,6 +228,8 @@ async def list_memories(
         examples=[1718505600]
     ),
     categories: Optional[str] = None,
+    memory_type: Optional[str] = Query(None, description="Filter by memory type (fact, preference, session, episodic)"),
+    agent_id: Optional[str] = Query(None, description="Filter by agent ID"),
     params: Params = Depends(),
     search_query: Optional[str] = None,
     sort_column: Optional[str] = Query(None, description="Column to sort by (memory, categories, app_name, created_at)"),
@@ -241,6 +263,10 @@ async def list_memories(
     # Apply filters
     if app_id:
         query = query.filter(Memory.app_id == app_id)
+    if memory_type:
+        query = query.filter(Memory.memory_type == memory_type)
+    if agent_id:
+        query = query.filter(Memory.agent_id == agent_id)
 
     if from_date:
         from_datetime = datetime.fromtimestamp(from_date, tz=UTC)
@@ -285,7 +311,11 @@ async def list_memories(
                 app_name=memory.app.name if memory.app else None,
                 created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
-                metadata_=memory.metadata_
+                metadata_=memory.metadata_,
+                memory_type=memory.memory_type,
+                agent_id=memory.agent_id,
+                run_id=memory.run_id,
+                expires_at=memory.expires_at,
             )
             for memory in items
             if check_memory_access_permissions(db, memory, app_id)
@@ -351,6 +381,10 @@ class CreateMemoryRequest(BaseModel):
     infer: bool = True
     app: str = "openmemory"
     project_slug: Optional[str] = None
+    memory_type: Optional[str] = None
+    agent_id: Optional[str] = None
+    run_id: Optional[str] = None
+    expires_at: Optional[str] = None
 
 
 class RegisterMemoryRequest(BaseModel):
@@ -530,6 +564,14 @@ async def create_memory(
     }
     if pctx:
         qdrant_meta["project_id"] = str(pctx.project_id)
+    if request.memory_type:
+        qdrant_meta["memory_type"] = request.memory_type
+    if request.agent_id:
+        qdrant_meta["agent_id"] = request.agent_id
+    if request.run_id:
+        qdrant_meta["run_id"] = request.run_id
+    if request.expires_at:
+        qdrant_meta["expires_at"] = request.expires_at
 
     try:
         qdrant_response = memory_client.add(
@@ -558,15 +600,26 @@ async def create_memory(
                             existing_memory.project_id = pctx.project_id
                         memory = existing_memory
                     else:
-                        memory = Memory(
+                        from datetime import timezone
+                        new_mem_kwargs = dict(
                             id=memory_id,
                             user_id=user.id,
                             app_id=app_obj.id,
                             project_id=pctx.project_id if pctx else None,
                             content=result['memory'],
                             metadata_=request.metadata,
-                            state=MemoryState.active
+                            state=MemoryState.active,
                         )
+                        if request.memory_type:
+                            new_mem_kwargs["memory_type"] = request.memory_type
+                        if request.agent_id:
+                            new_mem_kwargs["agent_id"] = request.agent_id
+                        if request.run_id:
+                            new_mem_kwargs["run_id"] = request.run_id
+                        if request.expires_at:
+                            from dateutil.parser import isoparse
+                            new_mem_kwargs["expires_at"] = isoparse(request.expires_at)
+                        memory = Memory(**new_mem_kwargs)
                         db.add(memory)
 
                     if result['event'] == 'ADD':
@@ -815,12 +868,17 @@ async def get_memory_access_log(
 class UpdateMemoryRequest(BaseModel):
     memory_content: str
     user_id: Optional[str] = None
+    memory_type: Optional[str] = None
+    agent_id: Optional[str] = None
+    run_id: Optional[str] = None
+    expires_at: Optional[str] = None
 
-# Update a memory
+
 @router.put("/{memory_id}")
 async def update_memory(
     memory_id: UUID,
     request: UpdateMemoryRequest,
+    background_tasks: BackgroundTasks,
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
@@ -828,8 +886,21 @@ async def update_memory(
     if memory.user_id != auth.db_user.id and not auth.is_superadmin:
         raise HTTPException(403, "Cannot update another user's memory")
     memory.content = request.memory_content
+    if request.memory_type is not None:
+        memory.memory_type = request.memory_type
+    if request.agent_id is not None:
+        memory.agent_id = request.agent_id
+    if request.run_id is not None:
+        memory.run_id = request.run_id
+    if request.expires_at is not None:
+        from dateutil.parser import isoparse
+        memory.expires_at = isoparse(request.expires_at)
     db.commit()
     db.refresh(memory)
+
+    from app.models import categorize_memory_background
+    background_tasks.add_task(categorize_memory_background, memory.id, memory.content)
+
     return memory
 
 class FilterMemoriesRequest(BaseModel):
@@ -846,6 +917,8 @@ class FilterMemoriesRequest(BaseModel):
     to_date: Optional[int] = None
     show_archived: Optional[bool] = False
     project_slug: Optional[str] = None
+    memory_type: Optional[str] = None
+    agent_id: Optional[str] = None
 
 @router.post("/filter", response_model=Page[MemoryResponse])
 async def filter_memories(
@@ -883,6 +956,10 @@ async def filter_memories(
     # Apply app filter
     if request.app_ids:
         query = query.filter(Memory.app_id.in_(request.app_ids))
+    if request.memory_type:
+        query = query.filter(Memory.memory_type == request.memory_type)
+    if request.agent_id:
+        query = query.filter(Memory.agent_id == request.agent_id)
 
     # Apply domain filter
     if request.domains:
@@ -951,7 +1028,11 @@ async def filter_memories(
                 app_name=memory.app.name if memory.app else None,
                 created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
-                metadata_=memory.metadata_
+                metadata_=memory.metadata_,
+                memory_type=memory.memory_type,
+                agent_id=memory.agent_id,
+                run_id=memory.run_id,
+                expires_at=memory.expires_at,
             )
             for memory in items
         ]
@@ -1013,8 +1094,246 @@ async def get_related_memories(
                 app_name=memory.app.name if memory.app else None,
                 created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
-                metadata_=memory.metadata_
+                metadata_=memory.metadata_,
+                memory_type=memory.memory_type,
+                agent_id=memory.agent_id,
+                run_id=memory.run_id,
+                expires_at=memory.expires_at,
             )
             for memory in items
         ]
     )
+
+
+# --- Phase 1b: New endpoints ---
+
+class RestoreMemoryRequest(BaseModel):
+    memory_ids: List[UUID]
+    project_slug: Optional[str] = None
+
+
+@router.post("/actions/restore")
+async def restore_memories(
+    request: RestoreMemoryRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Restore archived memories back to active state."""
+    user = auth.db_user
+    restored = []
+    for mid in request.memory_ids:
+        memory = get_memory_or_404(db, mid)
+        if memory.user_id != user.id and not auth.is_superadmin:
+            raise HTTPException(403, f"No permission to restore memory {mid}")
+        if memory.state != MemoryState.archived:
+            continue
+        update_memory_state(db, mid, MemoryState.active, user.id)
+        restored.append(str(mid))
+    return {"restored": restored, "count": len(restored)}
+
+
+class ExportMemoriesRequest(BaseModel):
+    format: str = "json"
+    categories: Optional[List[str]] = None
+    memory_type: Optional[str] = None
+    agent_id: Optional[str] = None
+    project_slug: Optional[str] = None
+
+
+@router.post("/export")
+async def export_memories(
+    request: ExportMemoriesRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Export memories, optionally filtered by category/type/agent, grouped by category."""
+    pctx = resolve_project(auth, db, request.project_slug)
+    user = auth.db_user
+
+    filters = [Memory.state == MemoryState.active]
+    if pctx:
+        filters.append(Memory.project_id == pctx.project_id)
+    else:
+        filters.append(Memory.user_id == user.id)
+    if request.memory_type:
+        filters.append(Memory.memory_type == request.memory_type)
+    if request.agent_id:
+        filters.append(Memory.agent_id == request.agent_id)
+
+    query = db.query(Memory).filter(*filters).options(joinedload(Memory.categories))
+
+    if request.categories:
+        query = query.join(Memory.categories).filter(Category.name.in_(request.categories))
+
+    memories = query.all()
+
+    grouped: dict = {}
+    for mem in memories:
+        cats = [c.name for c in mem.categories] or ["uncategorized"]
+        for cat in cats:
+            grouped.setdefault(cat, []).append({
+                "id": str(mem.id),
+                "content": mem.content,
+                "memory_type": mem.memory_type,
+                "agent_id": mem.agent_id,
+                "created_at": mem.created_at.isoformat() if mem.created_at else None,
+            })
+
+    if request.format == "text":
+        lines = []
+        for cat, items in grouped.items():
+            lines.append(f"## {cat}")
+            for item in items:
+                lines.append(f"- {item['content']}")
+            lines.append("")
+        return {"format": "text", "content": "\n".join(lines), "total": len(memories)}
+
+    return {"format": "json", "categories": grouped, "total": len(memories)}
+
+
+class ConsolidateRequest(BaseModel):
+    memory_ids: List[UUID]
+    dry_run: bool = True
+    project_slug: Optional[str] = None
+
+
+@router.post("/consolidate")
+async def consolidate_memories_endpoint(
+    request: ConsolidateRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Consolidate (merge) similar memories into one using LLM."""
+    user = auth.db_user
+    memories_data = []
+    for mid in request.memory_ids:
+        mem = get_memory_or_404(db, mid)
+        if mem.user_id != user.id and not auth.is_superadmin:
+            raise HTTPException(403, f"No permission to consolidate memory {mid}")
+        memories_data.append({"id": str(mid), "content": mem.content})
+
+    from app.utils.intelligence import consolidate_memories as _consolidate
+    consolidated_text = await asyncio.to_thread(_consolidate, memories_data)
+
+    if not consolidated_text:
+        raise HTTPException(500, "Consolidation failed — LLM unavailable or returned empty")
+
+    result = {
+        "consolidated_text": consolidated_text,
+        "source_memory_ids": [str(mid) for mid in request.memory_ids],
+        "dry_run": request.dry_run,
+    }
+
+    if not request.dry_run:
+        first_mem = db.query(Memory).filter(Memory.id == request.memory_ids[0]).first()
+        first_mem.content = consolidated_text
+        for mid in request.memory_ids[1:]:
+            update_memory_state(db, mid, MemoryState.archived, user.id)
+        db.commit()
+        result["kept_memory_id"] = str(request.memory_ids[0])
+
+    return result
+
+
+class ContradictionRequest(BaseModel):
+    new_memory: str
+    limit: int = 20
+    project_slug: Optional[str] = None
+
+
+@router.post("/check-contradiction")
+async def check_contradiction_endpoint(
+    request: ContradictionRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Check if a new memory text contradicts any existing memories."""
+    pctx = resolve_project(auth, db, request.project_slug)
+    user = auth.db_user
+
+    filters = [Memory.state == MemoryState.active]
+    if pctx:
+        filters.append(Memory.project_id == pctx.project_id)
+    else:
+        filters.append(Memory.user_id == user.id)
+
+    existing = db.query(Memory).filter(*filters).order_by(Memory.created_at.desc()).limit(request.limit).all()
+    existing_data = [{"id": str(m.id), "content": m.content} for m in existing]
+
+    from app.utils.intelligence import detect_contradiction
+    result = await asyncio.to_thread(detect_contradiction, request.new_memory, existing_data)
+    return result
+
+
+# --- Entities router (graph) ---
+
+entities_router = APIRouter(prefix="/api/v1/entities", tags=["entities"])
+
+
+@entities_router.get("/")
+async def list_graph_entities(
+    limit: int = Query(100, ge=1, le=500),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    """List all entities in the knowledge graph."""
+    from app.utils.graph_store import list_entities
+    entities = await asyncio.to_thread(list_entities, limit)
+    return {"entities": entities, "total": len(entities)}
+
+
+@entities_router.get("/search")
+async def search_graph_entities(
+    query: str = Query(..., description="Entity name to search for"),
+    limit: int = Query(20, ge=1, le=100),
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    """Search entities in the knowledge graph by name."""
+    from app.utils.graph_store import search_entities
+    results = await asyncio.to_thread(search_entities, query, limit)
+    return {"entities": results, "total": len(results)}
+
+
+@router.get("/stats/types")
+async def get_memory_type_stats(
+    project_slug: Optional[str] = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Get distribution of memory types for the dashboard."""
+    pctx = resolve_project(auth, db, project_slug)
+    user = auth.db_user
+
+    filters = [Memory.state == MemoryState.active]
+    if pctx:
+        filters.append(Memory.project_id == pctx.project_id)
+    else:
+        filters.append(Memory.user_id == user.id)
+
+    rows = (
+        db.query(Memory.memory_type, func.count(Memory.id))
+        .filter(*filters)
+        .group_by(Memory.memory_type)
+        .all()
+    )
+    distribution = {(r[0] or "untyped"): r[1] for r in rows}
+    return {"distribution": distribution, "total": sum(distribution.values())}
+
+
+@router.get("/stats/agents")
+async def get_agent_stats(
+    project_slug: Optional[str] = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Get list of distinct agent_ids used in memories."""
+    pctx = resolve_project(auth, db, project_slug)
+    user = auth.db_user
+
+    filters = [Memory.state == MemoryState.active, Memory.agent_id.isnot(None)]
+    if pctx:
+        filters.append(Memory.project_id == pctx.project_id)
+    else:
+        filters.append(Memory.user_id == user.id)
+
+    rows = db.query(Memory.agent_id).filter(*filters).distinct().all()
+    return {"agents": [r[0] for r in rows]}

@@ -2,7 +2,7 @@ import os
 
 from app.database import Base, engine
 from app.mcp_server import setup_mcp_server
-from app.routers import apps_router, backup_router, config_router, domains_router, memories_router, projects_router, stats_router
+from app.routers import apps_router, backup_router, config_router, domains_router, entities_router, memories_router, projects_router, stats_router
 from app.version import __version__
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +29,7 @@ Base.metadata.create_all(bind=engine)
 setup_mcp_server(app)
 
 app.include_router(memories_router)
+app.include_router(entities_router)
 app.include_router(apps_router)
 app.include_router(stats_router)
 app.include_router(config_router)

@@ -17,7 +17,10 @@
 **/.coverage
 **/coverage
 
+# Ignore build output (cache is mounted separately)
+**/.next
+
 # Ignore Docker runtime files
 **/.dockerignore
 **/Dockerfile
-**/docker-compose*.yml 
+**/docker-compose*.yml

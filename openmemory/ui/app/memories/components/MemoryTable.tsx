@@ -40,6 +40,7 @@ import { GoPackage } from "react-icons/go";
 import { CiCalendar } from "react-icons/ci";
 import { TbWorldSearch } from "react-icons/tb";
 import { FiUser } from "react-icons/fi";
+import { LuBrainCircuit, LuBot } from "react-icons/lu";
 import { useRouter } from "next/navigation";
 import Categories from "@/components/shared/categories";
 import { useUI } from "@/hooks/useUI";
@@ -148,6 +149,18 @@ export function MemoryTable() {
             </TableHead>
             <TableHead className="border-zinc-700">
               <div className="flex items-center whitespace-nowrap">
+                <LuBrainCircuit className="mr-1" size={14} />
+                Type
+              </div>
+            </TableHead>
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
+                <LuBot className="mr-1" size={14} />
+                Agent
+              </div>
+            </TableHead>
+            <TableHead className="border-zinc-700">
+              <div className="flex items-center whitespace-nowrap">
                 <FiUser className="mr-1" size={14} />
                 Created By
               </div>
@@ -246,6 +259,31 @@ export function MemoryTable() {
                 }`}>
                   {memory.domain}
                 </span>
+              </TableCell>
+              <TableCell className="text-center whitespace-nowrap">
+                {memory.memory_type ? (
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                    {
+                      fact: "border-blue-600/50 text-blue-400 bg-blue-950/30",
+                      preference: "border-purple-600/50 text-purple-400 bg-purple-950/30",
+                      session: "border-yellow-600/50 text-yellow-400 bg-yellow-950/30",
+                      episodic: "border-green-600/50 text-green-400 bg-green-950/30",
+                    }[memory.memory_type] || "border-zinc-600 text-zinc-400"
+                  }`}>
+                    {memory.memory_type}
+                  </span>
+                ) : (
+                  <span className="text-xs text-zinc-600">—</span>
+                )}
+              </TableCell>
+              <TableCell className="text-center whitespace-nowrap">
+                {memory.agent_id ? (
+                  <span className="text-xs px-2 py-0.5 rounded-full border border-zinc-600 text-zinc-300 bg-zinc-800/50">
+                    {memory.agent_id}
+                  </span>
+                ) : (
+                  <span className="text-xs text-zinc-600">—</span>
+                )}
               </TableCell>
               <TableCell className="whitespace-nowrap">
                 <span className="text-sm text-zinc-300">

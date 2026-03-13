@@ -13,6 +13,8 @@ export interface FiltersState {
     selectedApps: string[];
     selectedCategories: string[];
     selectedDomains: string[];
+    selectedMemoryType: string;
+    selectedAgentId: string;
     sortColumn: string;
     sortDirection: 'asc' | 'desc';
     showArchived: boolean;
@@ -36,6 +38,8 @@ const initialState: FiltersState = {
     selectedApps: [],
     selectedCategories: [],
     selectedDomains: [],
+    selectedMemoryType: '',
+    selectedAgentId: '',
     sortColumn: 'created_at',
     sortDirection: 'desc',
     showArchived: false,
@@ -98,10 +102,18 @@ const filtersSlice = createSlice({
     setShowArchived: (state, action: PayloadAction<boolean>) => {
       state.apps.showArchived = action.payload;
     },
+    setSelectedMemoryType: (state, action: PayloadAction<string>) => {
+      state.apps.selectedMemoryType = action.payload;
+    },
+    setSelectedAgentId: (state, action: PayloadAction<string>) => {
+      state.apps.selectedAgentId = action.payload;
+    },
     clearFilters: (state) => {
       state.apps.selectedApps = [];
       state.apps.selectedCategories = [];
       state.apps.selectedDomains = [];
+      state.apps.selectedMemoryType = '';
+      state.apps.selectedAgentId = '';
       state.apps.showArchived = false;
     },
     setSortingState: (state, action: PayloadAction<{ column: string; direction: 'asc' | 'desc' }>) => {
@@ -121,6 +133,8 @@ export const {
   setSelectedApps,
   setSelectedCategories,
   setSelectedDomains,
+  setSelectedMemoryType,
+  setSelectedAgentId,
   setShowArchived,
   clearFilters,
   setSortingState

@@ -52,6 +52,8 @@ export function MemoriesSection() {
             sortColumn: filters.sortColumn,
             sortDirection: filters.sortDirection,
             showArchived: filters.showArchived,
+            memoryType: filters.selectedMemoryType || undefined,
+            agentId: filters.selectedAgentId || undefined,
           }
         );
         setMemories(result.memories);

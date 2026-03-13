@@ -26,6 +26,10 @@ interface ApiMemoryItem {
   metadata_?: Record<string, any>;
   app_name: string;
   created_by?: string;
+  memory_type?: string | null;
+  agent_id?: string | null;
+  run_id?: string | null;
+  expires_at?: string | null;
 }
 
 interface ApiResponse {
@@ -80,6 +84,8 @@ interface UseMemoriesApiReturn {
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
+      memoryType?: string;
+      agentId?: string;
     }
   ) => Promise<{ memories: Memory[]; total: number; pages: number }>;
   fetchMemoryById: (memoryId: string) => Promise<void>;
@@ -116,6 +122,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
       sortColumn?: string;
       sortDirection?: 'asc' | 'desc';
       showArchived?: boolean;
+      memoryType?: string;
+      agentId?: string;
     }
   ): Promise<{ memories: Memory[], total: number, pages: number }> => {
     setIsLoading(true);
@@ -133,6 +141,8 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
           sort_column: filters?.sortColumn?.toLowerCase(),
           sort_direction: filters?.sortDirection,
           show_archived: filters?.showArchived,
+          memory_type: filters?.memoryType || undefined,
+          agent_id: filters?.agentId || undefined,
           project_slug: projectSlug || undefined,
         }
       );
@@ -148,6 +158,10 @@ export const useMemoriesApi = (): UseMemoriesApiReturn => {
         app_name: item.app_name,
         created_by: item.created_by || null,
         domain: item.metadata_?.domain || "General",
+        memory_type: item.memory_type || null,
+        agent_id: item.agent_id || null,
+        run_id: item.run_id || null,
+        expires_at: item.expires_at || null,
       }));
       setIsLoading(false);
       dispatch(setMemoriesSuccess(adaptedMemories));

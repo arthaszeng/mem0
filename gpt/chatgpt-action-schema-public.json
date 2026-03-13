@@ -1,89 +1,104 @@
-{
-  "openapi": "3.1.0",
-  "info": {
-    "title": "OpenMemory",
-    "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
-    "version": "1.0.0"
-  },
-  "servers": [
-    {
-      "url": "https://arthaszeng.top"
-    }
-  ],
-  "paths": {
-    "/auth/me": {
-      "get": {
-        "operationId": "getMyProfile",
-        "summary": "Get current user profile",
-        "description": "Returns the authenticated user's profile including username. MUST be called at the start of every new conversation to obtain the user_id for subsequent memory API calls.",
-        "responses": {
-          "200": {
-            "description": "User profile",
+  {
+    "openapi": "3.1.0",
+    "info": {
+      "title": "OpenMemory",
+      "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
+      "version": "1.4.0"
+    },
+    "servers": [
+      {
+        "url": "https://arthaszeng.top"
+      }
+    ],
+    "paths": {
+      "/auth/me": {
+        "get": {
+          "operationId": "getMyProfile",
+          "summary": "Get current user profile",
+          "description": "Returns the authenticated user's profile including username. MUST be called at the start of every new conversation to obtain the user_id for subsequent memory API calls.",
+          "responses": {
+            "200": {
+              "description": "User profile",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string", "description": "Internal user ID (UUID)" },
+                      "username": { "type": "string", "description": "Username — use this as user_id in all memory API calls" },
+                      "email": { "type": "string", "nullable": true }
+                    }
+                  }
+                }
+              }
+            },
+            "401": { "description": "Not authenticated" }
+          }
+        }
+      },
+      "/api/v1/memories/search": {
+        "post": {
+          "operationId": "searchMemories",
+          "summary": "Semantic search over memories",
+          "description": "Search personal memories by semantic similarity. Use this to recall past conversations, preferences, decisions, or any stored knowledge.",
+          "requestBody": {
+            "required": true,
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["query", "user_id"],
                   "properties": {
-                    "id": { "type": "string", "description": "Internal user ID (UUID)" },
-                    "username": { "type": "string", "description": "Username — use this as user_id in all memory API calls" },
-                    "email": { "type": "string", "nullable": true }
+                    "query": {
+                      "type": "string",
+                      "description": "Natural language search query"
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "User identifier — use the username returned by getMyProfile"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "default": 10,
+                      "description": "Max results to return"
+                    },
+                    "threshold": {
+                      "type": "number",
+                      "default": 0.0,
+                      "description": "Minimum similarity score (0.0 - 1.0)"
+                    },
+                    "categories": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Filter by category names"
+                    },
+                    "memory_type": {
+                      "type": "string",
+                      "enum": ["fact", "preference", "session", "episodic"],
+                      "description": "Filter by memory type"
+                    },
+                    "agent_id": {
+                      "type": "string",
+                      "description": "Filter by agent ID"
+                    }
                   }
                 }
               }
             }
           },
-          "401": { "description": "Not authenticated" }
-        }
-      }
-    },
-    "/api/v1/memories/search": {
-      "post": {
-        "operationId": "searchMemories",
-        "summary": "Semantic search over memories",
-        "description": "Search personal memories by semantic similarity. Use this to recall past conversations, preferences, decisions, or any stored knowledge.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["query", "user_id"],
-                "properties": {
-                  "query": {
-                    "type": "string",
-                    "description": "Natural language search query"
-                  },
-                  "user_id": {
-                    "type": "string",
-                    "description": "User identifier — use the username returned by getMyProfile"
-                  },
-                  "limit": {
-                    "type": "integer",
-                    "default": 10,
-                    "description": "Max results to return"
-                  },
-                  "threshold": {
-                    "type": "number",
-                    "default": 0.0,
-                    "description": "Minimum similarity score (0.0 - 1.0)"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Search results",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/MemoryResult"
+          "responses": {
+            "200": {
+              "description": "Search results",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "results": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/MemoryResult"
+                        }
                       }
                     }
                   }
@@ -92,171 +107,230 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/memories/": {
-      "post": {
-        "operationId": "createMemory",
-        "summary": "Create a new memory",
-        "description": "Store a new memory. Call this when the user shares preferences, decisions, facts, or asks you to remember something.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["text", "user_id"],
-                "properties": {
-                  "text": {
-                    "type": "string",
-                    "description": "Memory content — use complete sentences with full context"
-                  },
-                  "user_id": {
-                    "type": "string",
-                    "description": "User identifier — use the username returned by getMyProfile"
+      },
+      "/api/v1/memories/": {
+        "post": {
+          "operationId": "createMemory",
+          "summary": "Create a new memory",
+          "description": "Store a new memory. Call this when the user shares preferences, decisions, facts, or asks you to remember something.",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["text", "user_id"],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "Memory content — use complete sentences with full context"
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "User identifier — use the username returned by getMyProfile"
+                    },
+                    "memory_type": {
+                      "type": "string",
+                      "enum": ["fact", "preference", "session", "episodic"],
+                      "description": "Type of memory"
+                    },
+                    "agent_id": {
+                      "type": "string",
+                      "description": "Agent identifier"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO datetime when this memory expires"
+                    }
                   }
                 }
               }
             }
+          },
+          "responses": {
+            "200": {
+              "description": "Memory created"
+            }
           }
         },
-        "responses": {
-          "200": {
-            "description": "Memory created"
+        "get": {
+          "operationId": "listMemories",
+          "summary": "List all memories",
+          "description": "Retrieve a paginated list of all stored memories.",
+          "parameters": [
+            {
+              "name": "user_id",
+              "in": "query",
+              "required": true,
+              "schema": { "type": "string" },
+              "description": "User identifier — use the username returned by getMyProfile"
+            },
+            {
+              "name": "page",
+              "in": "query",
+              "schema": { "type": "integer", "default": 1 }
+            },
+            {
+              "name": "size",
+              "in": "query",
+              "schema": { "type": "integer", "default": 20 }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Paginated memory list"
+            }
           }
         }
       },
-      "get": {
-        "operationId": "listMemories",
-        "summary": "List all memories",
-        "description": "Retrieve a paginated list of all stored memories.",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "query",
+      "/api/v1/memories/{memory_id}": {
+        "get": {
+          "operationId": "getMemory",
+          "summary": "Get a specific memory by ID",
+          "parameters": [
+            {
+              "name": "memory_id",
+              "in": "path",
+              "required": true,
+              "schema": { "type": "string", "format": "uuid" }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Memory details"
+            }
+          }
+        },
+        "put": {
+          "operationId": "updateMemory",
+          "summary": "Update a memory's content",
+          "parameters": [
+            {
+              "name": "memory_id",
+              "in": "path",
+              "required": true,
+              "schema": { "type": "string", "format": "uuid" }
+            }
+          ],
+          "requestBody": {
             "required": true,
-            "schema": { "type": "string" },
-            "description": "User identifier — use the username returned by getMyProfile"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "schema": { "type": "integer", "default": 1 }
-          },
-          {
-            "name": "size",
-            "in": "query",
-            "schema": { "type": "integer", "default": 20 }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Paginated memory list"
-          }
-        }
-      }
-    },
-    "/api/v1/memories/{memory_id}": {
-      "get": {
-        "operationId": "getMemory",
-        "summary": "Get a specific memory by ID",
-        "parameters": [
-          {
-            "name": "memory_id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Memory details"
-          }
-        }
-      },
-      "put": {
-        "operationId": "updateMemory",
-        "summary": "Update a memory's content",
-        "parameters": [
-          {
-            "name": "memory_id",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["memory_content", "user_id"],
-                "properties": {
-                  "memory_content": {
-                    "type": "string"
-                  },
-                  "user_id": {
-                    "type": "string",
-                    "description": "User identifier — use the username returned by getMyProfile"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["memory_content", "user_id"],
+                  "properties": {
+                    "memory_content": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "description": "User identifier — use the username returned by getMyProfile"
+                    }
                   }
                 }
               }
             }
+          },
+          "responses": {
+            "200": {
+              "description": "Memory updated"
+            }
           }
         },
-        "responses": {
-          "200": {
-            "description": "Memory updated"
+        "delete": {
+          "operationId": "deleteMemory",
+          "summary": "Delete a memory",
+          "parameters": [
+            {
+              "name": "memory_id",
+              "in": "path",
+              "required": true,
+              "schema": { "type": "string", "format": "uuid" }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Memory deleted"
+            }
           }
         }
       },
-      "delete": {
-        "operationId": "deleteMemory",
-        "summary": "Delete a memory",
-        "parameters": [
-          {
-            "name": "memory_id",
-            "in": "path",
+      "/api/v1/memories/export": {
+        "post": {
+          "operationId": "exportMemories",
+          "summary": "Export memories grouped by category",
+          "requestBody": {
             "required": true,
-            "schema": { "type": "string", "format": "uuid" }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Memory deleted"
-          }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "format": { "type": "string", "enum": ["json", "text"], "default": "json" },
+                    "categories": { "type": "array", "items": { "type": "string" } },
+                    "memory_type": { "type": "string", "enum": ["fact", "preference", "session", "episodic"] },
+                    "agent_id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "responses": { "200": { "description": "Exported memories" } }
         }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "MemoryResult": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "memory": { "type": "string" },
-          "score": { "type": "number" },
-          "created_at": { "type": "string" },
-          "updated_at": { "type": "string", "nullable": true }
+      },
+      "/api/v1/memories/actions/restore": {
+        "post": {
+          "operationId": "restoreMemories",
+          "summary": "Restore archived memories",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["memory_ids"],
+                  "properties": {
+                    "memory_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+                  }
+                }
+              }
+            }
+          },
+          "responses": { "200": { "description": "Memories restored" } }
         }
       }
     },
-    "securitySchemes": {
-      "OAuth2": {
-        "type": "oauth2",
-        "flows": {
-          "authorizationCode": {
-            "authorizationUrl": "https://arthaszeng.top/auth/authorize",
-            "tokenUrl": "https://arthaszeng.top/auth/token",
-            "scopes": {}
+    "components": {
+      "schemas": {
+        "MemoryResult": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "memory": { "type": "string" },
+            "score": { "type": "number" },
+            "created_at": { "type": "string" },
+            "updated_at": { "type": "string", "nullable": true },
+            "memory_type": { "type": "string", "nullable": true },
+            "agent_id": { "type": "string", "nullable": true }
+          }
+        }
+      },
+      "securitySchemes": {
+        "OAuth2": {
+          "type": "oauth2",
+          "flows": {
+            "authorizationCode": {
+              "authorizationUrl": "https://arthaszeng.top/auth/authorize",
+              "tokenUrl": "https://arthaszeng.top/auth/token",
+              "scopes": {}
+            }
           }
         }
       }
-    }
-  },
-  "security": [
-    { "OAuth2": [] }
-  ]
-}
+    },
+    "security": [
+      { "OAuth2": [] }
+    ]
+  }

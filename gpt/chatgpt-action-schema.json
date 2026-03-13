@@ -3,7 +3,7 @@
   "info": {
     "title": "Arthas AI Platform (Private)",
     "description": "OpenMemory (personal memory system) + Concierge (Sanofi AI assistant) — private use only",
-    "version": "2.1.0"
+    "version": "2.2.0"
   },
   "servers": [
     {
@@ -66,6 +66,20 @@
                     "type": "number",
                     "default": 0.0,
                     "description": "Minimum similarity score (0.0 - 1.0)"
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Filter by category names"
+                  },
+                  "memory_type": {
+                    "type": "string",
+                    "enum": ["fact", "preference", "session", "episodic"],
+                    "description": "Filter by memory type"
+                  },
+                  "agent_id": {
+                    "type": "string",
+                    "description": "Filter by agent ID (e.g. chatgpt, cursor)"
                   }
                 }
               }
@@ -114,6 +128,20 @@
                   "user_id": {
                     "type": "string",
                     "description": "User identifier — use the username returned by getMyProfile"
+                  },
+                  "memory_type": {
+                    "type": "string",
+                    "enum": ["fact", "preference", "session", "episodic"],
+                    "description": "Type of memory: fact, preference, session, or episodic"
+                  },
+                  "agent_id": {
+                    "type": "string",
+                    "description": "Agent identifier (defaults to chatgpt)"
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO datetime when this memory expires (optional)"
                   }
                 }
               }
@@ -210,6 +238,52 @@
             "description": "Memory updated"
           }
         }
+      }
+    },
+    "/api/v1/memories/export": {
+      "post": {
+        "operationId": "exportMemories",
+        "summary": "Export memories grouped by category",
+        "description": "Export all or filtered memories in JSON or text format, grouped by category.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "format": { "type": "string", "enum": ["json", "text"], "default": "json" },
+                  "categories": { "type": "array", "items": { "type": "string" } },
+                  "memory_type": { "type": "string", "enum": ["fact", "preference", "session", "episodic"] },
+                  "agent_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Exported memories" } }
+      }
+    },
+    "/api/v1/memories/actions/restore": {
+      "post": {
+        "operationId": "restoreMemories",
+        "summary": "Restore archived memories",
+        "description": "Restore one or more archived memories back to active state.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["memory_ids"],
+                "properties": {
+                  "memory_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Memories restored" } }
       }
     },
     "/concierge-mcp/api/chat": {
@@ -333,7 +407,9 @@
           "memory": { "type": "string" },
           "score": { "type": "number" },
           "created_at": { "type": "string" },
-          "updated_at": { "type": "string", "nullable": true }
+          "updated_at": { "type": "string", "nullable": true },
+          "memory_type": { "type": "string", "nullable": true, "description": "fact, preference, session, or episodic" },
+          "agent_id": { "type": "string", "nullable": true, "description": "Agent that created this memory" }
         }
       }
     },

@@ -102,7 +102,40 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                       }
                     />
                   </div>
-                  <div className="flex items-center gap-2 justify-end flex-shrink-0">
+                  <div className="flex items-center gap-2 justify-end flex-shrink-0 flex-wrap">
+                    {(memory as any)?.memory_type && (
+                      <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
+                        <span className="text-sm text-zinc-400">Type:</span>
+                        <span className={`text-sm font-semibold ${
+                          {
+                            fact: "text-blue-400",
+                            preference: "text-purple-400",
+                            session: "text-yellow-400",
+                            episodic: "text-green-400",
+                          }[(memory as any).memory_type] || "text-zinc-100"
+                        }`}>{(memory as any).memory_type}</span>
+                      </div>
+                    )}
+                    {(memory as any)?.agent_id && (
+                      <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
+                        <span className="text-sm text-zinc-400">Agent:</span>
+                        <p className="text-sm text-zinc-100 font-semibold">{(memory as any).agent_id}</p>
+                      </div>
+                    )}
+                    {(memory as any)?.run_id && (
+                      <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
+                        <span className="text-sm text-zinc-400">Run:</span>
+                        <p className="text-sm text-zinc-100 font-semibold">{(memory as any).run_id}</p>
+                      </div>
+                    )}
+                    {(memory as any)?.expires_at && (
+                      <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
+                        <span className="text-sm text-zinc-400">Expires:</span>
+                        <p className="text-sm text-zinc-100 font-semibold">
+                          {new Date((memory as any).expires_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    )}
                     {memory?.created_by && (
                       <div className="flex items-center gap-1 bg-zinc-700 px-3 py-1 rounded-lg">
                         <span className="text-sm text-zinc-400">User:</span>
@@ -133,12 +166,6 @@ export function MemoryDetails({ memory_id }: MemoryDetailsProps) {
                     </div>
                   </div>
                 </div>
-
-                {/* <div className="flex justify-end gap-2 w-full mt-2">
-                <p className="text-sm font-semibold text-primary my-auto">
-                    {new Date(memory.created_at).toLocaleString()}
-                  </p>
-                </div> */}
               </div>
             </div>
           </div>

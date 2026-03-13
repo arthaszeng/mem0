@@ -248,15 +248,19 @@ class OSSProvider implements Mem0Provider {
   ): Promise<AddResult> {
     const text = messages.map((m) => `${m.role}: ${m.content}`).join("\n");
     try {
+      const reqBody: Record<string, unknown> = {
+        text,
+        user_id: options.user_id,
+        infer: true,
+        app: "openclaw",
+        agent_id: "openclaw",
+        metadata: { source_app: "openclaw", mcp_client: "openclaw" },
+      };
+      if (options.run_id) reqBody.run_id = options.run_id;
+      if ((options as any).memory_type) reqBody.memory_type = (options as any).memory_type;
       const body = await this.apiFetch<Record<string, unknown>>("/api/v1/memories/", {
         method: "POST",
-        body: JSON.stringify({
-          text,
-          user_id: options.user_id,
-          infer: true,
-          app: "openclaw",
-          metadata: { source_app: "openclaw", mcp_client: "openclaw" },
-        }),
+        body: JSON.stringify(reqBody),
       });
       return normalizeAddResult(body);
     } catch (err) {
@@ -269,14 +273,16 @@ class OSSProvider implements Mem0Provider {
     const limit = options.limit ?? options.top_k ?? 10;
     const threshold = options.threshold ?? 0;
     try {
+      const reqBody: Record<string, unknown> = {
+        query,
+        user_id: options.user_id,
+        limit,
+        threshold,
+      };
+      if ((options as any).agent_id) reqBody.agent_id = (options as any).agent_id;
       const body = await this.apiFetch<{ results: any[] }>("/api/v1/memories/search", {
         method: "POST",
-        body: JSON.stringify({
-          query,
-          user_id: options.user_id,
-          limit,
-          threshold,
-        }),
+        body: JSON.stringify(reqBody),
       });
       return (body.results ?? []).map(normalizeMemoryItem);
     } catch (err) {
@@ -725,6 +731,11 @@ const memoryPlugin = {
                 'Memory scope: "session" (current session only), "long-term" (user-scoped only), or "all" (both). Default: "all"',
             }),
           ),
+          agentId: Type.Optional(
+            Type.String({
+              description: "Filter by agent ID (e.g. openclaw, cursor, chatgpt)",
+            }),
+          ),
         }),
         async execute(_toolCallId, params) {
           const { query, limit, userId, scope = "all" } = params as {
@@ -843,20 +854,33 @@ const memoryPlugin = {
                 "Store as long-term (user-scoped) memory. Default: true. Set to false for session-scoped memory.",
             }),
           ),
+          memoryType: Type.Optional(
+            Type.Union([
+              Type.Literal("fact"),
+              Type.Literal("preference"),
+              Type.Literal("session"),
+              Type.Literal("episodic"),
+            ], {
+              description: "Memory type classification",
+            }),
+          ),
         }),
         async execute(_toolCallId, params) {
-          const { text, userId, longTerm = true } = params as {
+          const { text, userId, longTerm = true, memoryType } = params as {
             text: string;
             userId?: string;
             metadata?: Record<string, unknown>;
             longTerm?: boolean;
+            memoryType?: string;
           };
 
           try {
             const runId = !longTerm && currentSessionId ? currentSessionId : undefined;
+            const addOpts = buildAddOptions(userId, runId);
+            if (memoryType) (addOpts as any).memory_type = memoryType;
             const result = await provider.add(
               [{ role: "user", content: text }],
-              buildAddOptions(userId, runId),
+              addOpts,
             );
 
             const added =

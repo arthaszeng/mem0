@@ -6,7 +6,8 @@ WORKDIR /usr/src/openmemory
 
 COPY requirements.txt .
 ARG PIP_INDEX_URL=https://pypi.org/simple/
-RUN pip install -i ${PIP_INDEX_URL} -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -i ${PIP_INDEX_URL} -r requirements.txt
 
 COPY config.json .
 COPY . .
