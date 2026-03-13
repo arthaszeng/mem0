@@ -80,8 +80,10 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 
 ## v0.7 | Memory Quality | in_progress | 进行中 | brain
 
-记忆质量升级 — 更精准的提取、更智能的过滤
+记忆质量升级 — 测试基线 + 版本管理 + 更精准的提取
 
+- [x] **测试基线** — pytest 回归测试框架：health / CRUD / search 覆盖，`make test` 一键运行
+- [x] **版本管理** — API `app/version.py` + UI `package.json` 统一版本号，`/health` 端点暴露版本
 - [ ] **Fact Extraction 增强** — 丰富 few-shot 正负例，过滤闲聊 / 推测 / 调试输出
 - [ ] **Confidence Threshold** — 置信度门控，模糊表述自动标记或丢弃
 - [ ] **Per-Call Instructions** — 支持每次请求覆盖全局提取规则，灵活适配不同场景
