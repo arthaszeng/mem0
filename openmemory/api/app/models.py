@@ -34,6 +34,14 @@ class MemoryState(enum.Enum):
     paused = "paused"
     archived = "archived"
     deleted = "deleted"
+    expired = "expired"
+
+
+class MemoryType(enum.Enum):
+    fact = "fact"
+    preference = "preference"
+    session = "session"
+    episodic = "episodic"
 
 
 class ProjectRole(enum.Enum):
@@ -166,6 +174,8 @@ class Memory(Base):
                         onupdate=get_current_utc_time)
     archived_at = Column(DateTime, nullable=True, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    memory_type = Column(String, nullable=True, index=True)
 
     user = relationship("User", back_populates="memories")
     app = relationship("App", back_populates="memories")
@@ -177,6 +187,7 @@ class Memory(Base):
         Index('idx_memory_app_state', 'app_id', 'state'),
         Index('idx_memory_user_app', 'user_id', 'app_id'),
         Index('idx_memory_project', 'project_id'),
+        Index('idx_memory_expires', 'expires_at'),
     )
 
 

@@ -88,13 +88,15 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **Confidence Threshold** — 置信度门控 (0.0-1.0)，模糊表述自动过滤，DB 配置持久化
 - [x] **Per-Call Instructions** — MCP add_memories 支持 `infer` 和 `instructions` 参数，按需覆盖全局规则
 
-## v0.8 | Memory Lifecycle | upcoming | 计划中 | clock
+## v0.8 | Memory Lifecycle | completed | 2026-03 | clock
 
-记忆不再永久堆积 — 自动过期、智能归档、类型分层
+记忆不再永久堆积 — 自动过期、类型分层
 
-- [ ] **TTL 自动过期** — 支持 expiration_date，定时任务自动清理过期记忆
-- [ ] **ArchivePolicy 自动化** — 按 app / category / domain 设置差异化归档策略
-- [ ] **Memory Type 分层** — session / preference / fact / episodic 四类标签，搜索按类型过滤
+- [x] **TTL 自动过期** — Memory 新增 expires_at 列，后台每 5 分钟扫描并标记过期记忆为 expired 状态
+- [x] **Memory Type 分层** — session / preference / fact / episodic 四类标签，MCP add_memories 支持 memory_type 参数
+- [x] **MCP 生命周期参数** — add_memories 新增 expires_at 和 memory_type，支持 ISO 8601 过期时间
+- [x] **Alembic 迁移** — v0_8_lifecycle 迁移添加 expires_at / memory_type 列和索引
+- [ ] **ArchivePolicy 自动化** — 按 app / category / domain 设置差异化归档策略（延至 v1.x）
 
 ## v0.9 | Advanced Retrieval | upcoming | 计划中 | search
 

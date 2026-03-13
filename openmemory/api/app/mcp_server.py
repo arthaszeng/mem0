@@ -76,12 +76,21 @@ async def _memory_write_worker():
     while True:
         task = await q.get()
         try:
-            # Backward-compatible unpack: old 4-tuple or new 6-tuple
-            if len(task) == 6:
-                uid, client_name, text, task_project_slug, task_infer, task_instructions = task
+            if isinstance(task, dict):
+                uid = task["uid"]
+                client_name = task["client_name"]
+                text = task["text"]
+                task_project_slug = task.get("project_slug", "")
+                task_infer = task.get("infer", True)
+                task_instructions = task.get("instructions", "")
+                task_expires_at = task.get("expires_at", "")
+                task_memory_type = task.get("memory_type", "")
             else:
-                uid, client_name, text, task_project_slug = task
-                task_infer, task_instructions = True, ""
+                uid, client_name, text, task_project_slug = task[:4]
+                task_infer = task[4] if len(task) > 4 else True
+                task_instructions = task[5] if len(task) > 5 else ""
+                task_expires_at = ""
+                task_memory_type = ""
 
             memory_client = get_memory_client_safe()
             if not memory_client:
@@ -121,6 +130,13 @@ async def _memory_write_worker():
                 if saved_prompt is not None:
                     memory_client.config.custom_fact_extraction_prompt = saved_prompt
 
+            parsed_expires = None
+            if task_expires_at:
+                try:
+                    parsed_expires = datetime.datetime.fromisoformat(task_expires_at.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    logging.warning("Invalid expires_at value: %s", task_expires_at)
+
             db = SessionLocal()
             try:
                 user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
@@ -148,6 +164,11 @@ async def _memory_write_worker():
                                 if project_id and not memory.project_id:
                                     memory.project_id = project_id
 
+                            if parsed_expires:
+                                memory.expires_at = parsed_expires
+                            if task_memory_type:
+                                memory.memory_type = task_memory_type
+
                             db.add(MemoryStatusHistory(
                                 memory_id=memory_id,
                                 changed_by=user.id,
@@ -172,6 +193,12 @@ async def _memory_write_worker():
                                     state=MemoryState.active,
                                 )
                                 db.add(memory)
+
+                            if parsed_expires and memory:
+                                memory.expires_at = parsed_expires
+                            if task_memory_type and memory:
+                                memory.memory_type = task_memory_type
+
                             memories_to_categorize.append((memory_id, result["memory"]))
 
                         elif result["event"] == "DELETE":
@@ -256,12 +283,16 @@ async def add_memories(
     text: str,
     infer: bool = True,
     instructions: str = "",
+    expires_at: str = "",
+    memory_type: str = "",
 ) -> str:
     """
     Args:
         text: The content to memorize.
         infer: If True (default), LLM extracts key facts from text. If False, store text as-is.
         instructions: Per-call extraction instructions that override the global prompt for this request only.
+        expires_at: ISO 8601 expiration datetime (e.g. "2026-04-01T00:00:00Z"). Memory auto-expires after this time.
+        memory_type: One of "fact", "preference", "session", "episodic". Helps with retrieval filtering.
     """
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
@@ -289,7 +320,16 @@ async def add_memories(
 
     q = _get_queue()
     pslug = project_slug_var.get("")
-    await q.put((uid, client_name, text, pslug, infer, instructions or ""))
+    await q.put({
+        "uid": uid,
+        "client_name": client_name,
+        "text": text,
+        "project_slug": pslug,
+        "infer": infer,
+        "instructions": instructions or "",
+        "expires_at": expires_at or "",
+        "memory_type": memory_type or "",
+    })
     pending = q.qsize()
     return json.dumps({
         "status": "queued",
@@ -785,5 +825,9 @@ def setup_mcp_server(app: FastAPI):
     async def _start_memory_worker():
         asyncio.create_task(_memory_write_worker())
         logging.info("Memory write worker started")
+
+        from app.utils.ttl_cleanup import ttl_cleanup_loop
+        asyncio.create_task(ttl_cleanup_loop())
+        logging.info("TTL cleanup loop started")
 
     app.include_router(mcp_router)
