@@ -129,13 +129,13 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **Graph-Enhanced Search** — search_memory 自动查询 Kuzu 图谱关联实体的记忆，融入搜索结果 (score 0.6)
 - [ ] **Agent Memory** — 每个 AI 角色独立的 Custom Instructions 和个性记忆（延至 v1.3）
 
-## v1.2 | MCP Complete | upcoming | 计划中 | wrench
+## v1.2 | MCP Complete | completed | 2026-03 | wrench
 
 MCP 工具集追平 REST API — 更新、归档、结构化导出
 
-- [ ] **MCP Update Tool** — update_memory 工具：更新 Qdrant + SQLite + 触发重分类
-- [ ] **Archive / Restore Tools** — MCP 端批量归档和恢复
-- [ ] **Structured Export** — JSON Schema 驱动的结构化导出，LLM 编译用户画像
+- [x] **MCP Update Tool** — update_memory(memory_id, new_content)，更新后自动触发重分类+实体提取
+- [x] **Archive / Restore Tools** — archive_memories + restore_memories，MCP 端批量归档和恢复
+- [x] **Structured Export** — export_memories(format) 支持 JSON 和 text 两种格式，按 category 分组导出
 
 ## v1.3 | Intelligence | upcoming | 远期 | zap
 
