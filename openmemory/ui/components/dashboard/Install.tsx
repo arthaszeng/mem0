@@ -1,203 +1,379 @@
 "use client";
 
 import React, { useState } from "react";
-import { useSelector } from "react-redux";
-import { RootState } from "@/store/store";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Copy, Check } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Copy, Check, ExternalLink } from "lucide-react";
 import Image from "next/image";
 import { useProject } from "@/contexts/ProjectContext";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
-const clientTabs = [
-  { key: "claude", label: "Claude", icon: `${basePath}/images/claude.webp` },
-  { key: "cursor", label: "Cursor", icon: `${basePath}/images/cursor.png` },
-  { key: "cline", label: "Cline", icon: `${basePath}/images/cline.png` },
-  { key: "roocline", label: "Roo Cline", icon: `${basePath}/images/roocline.png` },
-  { key: "windsurf", label: "Windsurf", icon: `${basePath}/images/windsurf.png` },
-  { key: "witsy", label: "Witsy", icon: `${basePath}/images/witsy.png` },
-  { key: "enconvo", label: "Enconvo", icon: `${basePath}/images/enconvo.png` },
-  { key: "augment", label: "Augment", icon: `${basePath}/images/augment.png` },
+interface TabDef {
+  key: string;
+  label: string;
+  icon: string;
+  gradient: string;
+}
+
+const tabs: TabDef[] = [
+  {
+    key: "register",
+    label: "Registration",
+    icon: "📋",
+    gradient:
+      "data-[state=active]:bg-[linear-gradient(to_top,_rgba(234,179,8,0.3),_rgba(234,179,8,0))] data-[state=active]:border-[#EAB308]",
+  },
+  {
+    key: "mcp",
+    label: "MCP Link",
+    icon: "🔗",
+    gradient:
+      "data-[state=active]:bg-[linear-gradient(to_top,_rgba(126,63,242,0.3),_rgba(126,63,242,0))] data-[state=active]:border-[#7E3FF2]",
+  },
+  {
+    key: "openclaw",
+    label: "OpenClaw",
+    icon: "🐾",
+    gradient:
+      "data-[state=active]:bg-[linear-gradient(to_top,_rgba(239,108,60,0.3),_rgba(239,108,60,0))] data-[state=active]:border-[#EF6C3C]",
+  },
+  {
+    key: "cursor",
+    label: "Cursor",
+    icon: `${basePath}/images/cursor.png`,
+    gradient:
+      "data-[state=active]:bg-[linear-gradient(to_top,_rgba(255,255,255,0.08),_rgba(255,255,255,0))] data-[state=active]:border-[#708090]",
+  },
+  {
+    key: "copilot",
+    label: "GitHub Copilot",
+    icon: "🤖",
+    gradient:
+      "data-[state=active]:bg-[linear-gradient(to_top,_rgba(33,135,255,0.3),_rgba(33,135,255,0))] data-[state=active]:border-[#2187FF]",
+  },
+  {
+    key: "chatgpt",
+    label: "ChatGPT",
+    icon: "💬",
+    gradient:
+      "data-[state=active]:bg-[linear-gradient(to_top,_rgba(16,163,127,0.3),_rgba(16,163,127,0))] data-[state=active]:border-[#10A37F]",
+  },
 ];
 
-const colorGradientMap: { [key: string]: string } = {
-  claude:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(239,108,60,0.3),_rgba(239,108,60,0))] data-[state=active]:border-[#EF6C3C]",
-  cline:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(112,128,144,0.3),_rgba(112,128,144,0))] data-[state=active]:border-[#708090]",
-  cursor:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(255,255,255,0.08),_rgba(255,255,255,0))] data-[state=active]:border-[#708090]",
-  roocline:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(45,32,92,0.8),_rgba(45,32,92,0))] data-[state=active]:border-[#7E3FF2]",
-  windsurf:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(0,176,137,0.3),_rgba(0,176,137,0))] data-[state=active]:border-[#00B089]",
-  witsy:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(33,135,255,0.3),_rgba(33,135,255,0))] data-[state=active]:border-[#2187FF]",
-  enconvo:
-    "data-[state=active]:bg-[linear-gradient(to_top,_rgba(126,63,242,0.3),_rgba(126,63,242,0))] data-[state=active]:border-[#7E3FF2]",
-};
+function CodeBlock({
+  code,
+  copied,
+  onCopy,
+}: {
+  code: string;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div className="relative">
+      <pre className="bg-zinc-800 px-4 py-3 rounded-md overflow-x-auto text-sm leading-relaxed">
+        <code className="text-gray-300">{code}</code>
+      </pre>
+      <button
+        className="absolute top-0 right-0 py-3 px-4 rounded-md hover:bg-zinc-600 bg-zinc-700"
+        aria-label="Copy to clipboard"
+        onClick={onCopy}
+      >
+        {copied ? (
+          <Check className="h-4 w-4 text-green-400" />
+        ) : (
+          <Copy className="h-4 w-4 text-zinc-400" />
+        )}
+      </button>
+    </div>
+  );
+}
 
-const getColorGradient = (color: string) => {
-  if (colorGradientMap[color]) {
-    return colorGradientMap[color];
-  }
-  return "data-[state=active]:bg-[linear-gradient(to_top,_rgba(126,63,242,0.3),_rgba(126,63,242,0))] data-[state=active]:border-[#7E3FF2]";
-};
-
-const allTabs = [{ key: "mcp", label: "MCP Link", icon: "🔗" }, ...clientTabs];
+function Step({
+  n,
+  children,
+}: {
+  n: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-3 items-start">
+      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-600/30 text-purple-400 text-xs font-bold flex items-center justify-center mt-0.5">
+        {n}
+      </span>
+      <div className="text-sm text-zinc-300 leading-relaxed flex-1">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export const Install = () => {
-  const [copiedTab, setCopiedTab] = useState<string | null>(null);
-  const user = useSelector((state: RootState) => state.profile.userId) || "user";
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const { projectSlug } = useProject();
 
-  const URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
   const mcpBase = projectSlug
-    ? `${URL}/memory-mcp/p/${projectSlug}`
-    : `${URL}/memory-mcp`;
+    ? `${API_URL}/memory-mcp/p/${projectSlug}`
+    : `${API_URL}/memory-mcp`;
+  const sseUrl = (client: string) => `${mcpBase}/${client}/sse`;
+  const HOST = API_URL.replace(/:\d+$/, "");
 
-  const handleCopy = async (tab: string, isMcp: boolean = false) => {
-    const text = isMcp
-      ? `${mcpBase}/openmemory/sse`
-      : `npx @openmemory/install local ${mcpBase}/${tab}/sse --client ${tab}`;
-
+  const handleCopy = async (id: string, text: string) => {
     try {
-      // Try using the Clipboard API first
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
       } else {
-        // Fallback: Create a temporary textarea element
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
         document.execCommand("copy");
-        document.body.removeChild(textarea);
+        document.body.removeChild(ta);
       }
-
-      // Update UI to show success
-      setCopiedTab(tab);
-      setTimeout(() => setCopiedTab(null), 1500); // Reset after 1.5s
-    } catch (error) {
-      console.error("Failed to copy text:", error);
-      // You might want to add a toast notification here to show the error
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch (e) {
+      console.error("Copy failed:", e);
     }
   };
+
+  const cursorConfig = `// ~/.cursor/mcp.json
+{
+  "mcpServers": {
+    "OpenMemory": {
+      "url": "${sseUrl("cursor")}",
+      "headers": {
+        "Authorization": "Bearer <your-api-token>"
+      }
+    }
+  }
+}`;
+
+  const copilotConfig = `// ~/.config/github-copilot/intellij/mcp.json
+{
+  "mcpServers": {
+    "OpenMemory": {
+      "type": "sse",
+      "url": "${sseUrl("github-copilot")}",
+      "tools": ["*"],
+      "headers": {
+        "Authorization": "Bearer <your-token>"
+      }
+    }
+  }
+}`;
+
+  const openClawConfig = `// OpenClaw Settings → Plugins → mem0
+{
+  "serverUrl": "${API_URL}",
+  "userId": "<your-user-id>",
+  "autoCapture": true,
+  "autoRecall": true
+}`;
 
   return (
     <div>
       <h2 className="text-xl font-semibold mb-6">Install OpenMemory</h2>
 
-      <div className="hidden">
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(239,108,60,0.3),_rgba(239,108,60,0))] data-[state=active]:border-[#EF6C3C]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(112,128,144,0.3),_rgba(112,128,144,0))] data-[state=active]:border-[#708090]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(45,32,92,0.3),_rgba(45,32,92,0))] data-[state=active]:border-[#2D205C]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(0,176,137,0.3),_rgba(0,176,137,0))] data-[state=active]:border-[#00B089]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(33,135,255,0.3),_rgba(33,135,255,0))] data-[state=active]:border-[#2187FF]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(126,63,242,0.3),_rgba(126,63,242,0))] data-[state=active]:border-[#7E3FF2]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(239,108,60,0.3),_rgba(239,108,60,0))] data-[state=active]:border-[#EF6C3C]"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(107,33,168,0.3),_rgba(107,33,168,0))] data-[state=active]:border-primary"></div>
-        <div className="data-[state=active]:bg-[linear-gradient(to_top,_rgba(255,255,255,0.08),_rgba(255,255,255,0))] data-[state=active]:border-[#708090]"></div>
-      </div>
-
-      <Tabs defaultValue="claude" className="w-full">
+      <Tabs defaultValue="register" className="w-full">
         <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-0 p-0 flex flex-wrap sm:flex-nowrap overflow-x-auto">
-          {allTabs.map(({ key, label, icon }) => (
+          {tabs.map(({ key, label, icon, gradient }) => (
             <TabsTrigger
               key={key}
               value={key}
-              className={`flex-shrink-0 px-3 pb-2 rounded-none ${getColorGradient(
-                key
-              )} data-[state=active]:border-b-2 data-[state=active]:shadow-none text-zinc-400 data-[state=active]:text-white flex items-center justify-center gap-1.5 text-sm whitespace-nowrap`}
+              className={`flex-shrink-0 px-3 pb-2 rounded-none ${gradient} data-[state=active]:border-b-2 data-[state=active]:shadow-none text-zinc-400 data-[state=active]:text-white flex items-center justify-center gap-1.5 text-sm whitespace-nowrap`}
             >
               {icon.startsWith("/") ? (
-                <div>
-                  <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
-                    <Image src={icon} alt={label} width={40} height={40} />
-                  </div>
+                <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden">
+                  <Image src={icon} alt={label} width={40} height={40} />
                 </div>
               ) : (
-                <div className="h-6">
-                  <span className="relative top-1">{icon}</span>
-                </div>
+                <span className="text-base">{icon}</span>
               )}
               <span>{label}</span>
             </TabsTrigger>
           ))}
         </TabsList>
 
-        {/* MCP Tab Content */}
-        <TabsContent value="mcp" className="mt-6">
+        {/* Registration */}
+        <TabsContent value="register" className="mt-6">
           <Card className="bg-zinc-900 border-zinc-800">
-            <CardHeader className="py-4">
-              <CardTitle className="text-white text-xl">MCP Link</CardTitle>
-            </CardHeader>
-            <hr className="border-zinc-800" />
-            <CardContent className="py-4">
-              <div className="relative">
-                <pre className="bg-zinc-800 px-4 py-3 rounded-md overflow-x-auto text-sm">
-                  <code className="text-gray-300">
-                    {mcpBase}/openmemory/sse
-                  </code>
-                </pre>
-                <div>
-                  <button
-                    className="absolute top-0 right-0 py-3 px-4 rounded-md hover:bg-zinc-600 bg-zinc-700"
-                    aria-label="Copy to clipboard"
-                    onClick={() => handleCopy("mcp", true)}
+            <CardContent className="py-5 space-y-5">
+              <div className="bg-yellow-900/20 border border-yellow-700/40 rounded-lg px-4 py-3">
+                <p className="text-sm text-yellow-300/90 font-medium">Invite Only</p>
+                <p className="text-sm text-zinc-400 mt-1">
+                  OpenMemory is currently invite-only. You need an account to use the service.
+                </p>
+              </div>
+              <div className="space-y-3">
+                <Step n={1}>
+                  Contact the admin to receive an invitation and create your account.
+                </Step>
+                <Step n={2}>
+                  Visit the{" "}
+                  <a
+                    href={`${HOST}/memory`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-400 hover:underline inline-flex items-center gap-1"
                   >
-                    {copiedTab === "mcp" ? (
-                      <Check className="h-5 w-5 text-green-400" />
-                    ) : (
-                      <Copy className="h-5 w-5 text-zinc-400" />
-                    )}
-                  </button>
-                </div>
+                    OpenMemory Dashboard <ExternalLink className="h-3 w-3" />
+                  </a>{" "}
+                  to log in and manage your memories.
+                </Step>
+                <Step n={3}>
+                  Once logged in, choose a client tab above to set up your preferred AI tool.
+                </Step>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Client Tabs Content */}
-        {clientTabs.map(({ key }) => (
-          <TabsContent key={key} value={key} className="mt-6">
-            <Card className="bg-zinc-900 border-zinc-800">
-              <CardHeader className="py-4">
-                <CardTitle className="text-white text-xl">
-                  {key.charAt(0).toUpperCase() + key.slice(1)} Installation
-                  Command
-                </CardTitle>
-              </CardHeader>
-              <hr className="border-zinc-800" />
-              <CardContent className="py-4">
-                <div className="relative">
-                  <pre className="bg-zinc-800 px-4 py-3 rounded-md overflow-x-auto text-sm">
-                    <code className="text-gray-300">
-                      {`npx @openmemory/install local ${mcpBase}/${key}/sse --client ${key}`}
-                    </code>
-                  </pre>
-                  <div>
-                    <button
-                      className="absolute top-0 right-0 py-3 px-4 rounded-md hover:bg-zinc-600 bg-zinc-700"
-                      aria-label="Copy to clipboard"
-                      onClick={() => handleCopy(key)}
-                    >
-                      {copiedTab === key ? (
-                        <Check className="h-5 w-5 text-green-400" />
-                      ) : (
-                        <Copy className="h-5 w-5 text-zinc-400" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
+        {/* MCP Link */}
+        <TabsContent value="mcp" className="mt-6">
+          <Card className="bg-zinc-900 border-zinc-800">
+            <CardContent className="py-5 space-y-4">
+              <p className="text-sm text-zinc-400">
+                SSE endpoint for any MCP-compatible client. Copy and paste into your client&apos;s MCP configuration.
+              </p>
+              <CodeBlock
+                code={sseUrl("your-client")}
+                copied={copiedId === "mcp"}
+                onCopy={() => handleCopy("mcp", sseUrl("your-client"))}
+              />
+              <p className="text-xs text-zinc-500">
+                Replace <code className="text-zinc-400">your-client</code> with your client name (e.g. claude, windsurf).
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* OpenClaw */}
+        <TabsContent value="openclaw" className="mt-6">
+          <Card className="bg-zinc-900 border-zinc-800">
+            <CardContent className="py-5 space-y-4">
+              <div className="space-y-3">
+                <Step n={1}>
+                  Install the <code className="text-purple-400">openclaw-mem0</code> plugin from the OpenClaw Plugin Marketplace.
+                </Step>
+                <Step n={2}>
+                  Configure the plugin in <code className="text-purple-400">Settings → Plugins → mem0</code>:
+                </Step>
+              </div>
+              <CodeBlock
+                code={openClawConfig}
+                copied={copiedId === "openclaw"}
+                onCopy={() => handleCopy("openclaw", openClawConfig)}
+              />
+              <div className="space-y-3">
+                <Step n={3}>
+                  The plugin auto-captures important facts from conversations and auto-recalls relevant memories. No manual action needed.
+                </Step>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Cursor */}
+        <TabsContent value="cursor" className="mt-6">
+          <Card className="bg-zinc-900 border-zinc-800">
+            <CardContent className="py-5 space-y-4">
+              <div className="space-y-3">
+                <Step n={1}>
+                  Open (or create) <code className="text-purple-400">~/.cursor/mcp.json</code>
+                </Step>
+                <Step n={2}>
+                  Add the following configuration:
+                </Step>
+              </div>
+              <CodeBlock
+                code={cursorConfig}
+                copied={copiedId === "cursor"}
+                onCopy={() => handleCopy("cursor", cursorConfig)}
+              />
+              <div className="space-y-3">
+                <Step n={3}>
+                  Replace <code className="text-purple-400">&lt;your-api-token&gt;</code> with your API token. Contact <strong className="text-white">Arthas</strong> to obtain one.
+                </Step>
+                <Step n={4}>
+                  Restart Cursor. The OpenMemory tools will appear in the MCP panel.
+                </Step>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* GitHub Copilot */}
+        <TabsContent value="copilot" className="mt-6">
+          <Card className="bg-zinc-900 border-zinc-800">
+            <CardContent className="py-5 space-y-4">
+              <div className="space-y-3">
+                <Step n={1}>
+                  Enable <code className="text-purple-400">Agent Mode</code> in IntelliJ IDEA Copilot settings.
+                </Step>
+                <Step n={2}>
+                  Open (or create) <code className="text-purple-400">~/.config/github-copilot/intellij/mcp.json</code>:
+                </Step>
+              </div>
+              <CodeBlock
+                code={copilotConfig}
+                copied={copiedId === "copilot"}
+                onCopy={() => handleCopy("copilot", copilotConfig)}
+              />
+              <div className="space-y-3">
+                <Step n={3}>
+                  Replace <code className="text-purple-400">&lt;your-token&gt;</code> with your API token. Contact <strong className="text-white">Arthas</strong> to obtain one.
+                </Step>
+                <Step n={4}>
+                  Restart IntelliJ IDEA. Use <code className="text-purple-400">@OpenMemory</code> in Copilot Chat to access memories.
+                </Step>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ChatGPT */}
+        <TabsContent value="chatgpt" className="mt-6">
+          <Card className="bg-zinc-900 border-zinc-800">
+            <CardContent className="py-5 space-y-5">
+              <p className="text-sm text-zinc-400">
+                Use OpenMemory directly in ChatGPT via the <strong className="text-white">Memory Universe</strong> GPT.
+              </p>
+              <div className="space-y-3">
+                <Step n={1}>
+                  Open{" "}
+                  <a
+                    href="https://chatgpt.com/g/g-69b3d10d0c488191929f0fdb728997cd-memory-universe"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    Memory Universe GPT <ExternalLink className="h-3 w-3" />
+                  </a>{" "}
+                  or search <code className="text-purple-400">Memory Universe</code> in the{" "}
+                  <a
+                    href="https://chatgpt.com/gpts"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-purple-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    GPT Store <ExternalLink className="h-3 w-3" />
+                  </a>.
+                </Step>
+                <Step n={2}>
+                  Start a conversation. When the GPT needs to access your memories, it will prompt you to log in with your OpenMemory account.
+                </Step>
+                <Step n={3}>
+                  After authorization, the GPT can search, create, and manage your memories seamlessly within ChatGPT.
+                </Step>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
   );

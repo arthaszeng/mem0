@@ -11,6 +11,31 @@
     }
   ],
   "paths": {
+    "/auth/me": {
+      "get": {
+        "operationId": "getMyProfile",
+        "summary": "Get current user profile",
+        "description": "Returns the authenticated user's profile including username. MUST be called at the start of every new conversation to obtain the user_id for subsequent memory API calls.",
+        "responses": {
+          "200": {
+            "description": "User profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "description": "Internal user ID (UUID)" },
+                    "username": { "type": "string", "description": "Username — use this as user_id in all memory API calls" },
+                    "email": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Not authenticated" }
+        }
+      }
+    },
     "/api/v1/memories/search": {
       "post": {
         "operationId": "searchMemories",
@@ -30,7 +55,7 @@
                   },
                   "user_id": {
                     "type": "string",
-                    "description": "User identifier — use the authenticated user's username"
+                    "description": "User identifier — use the username returned by getMyProfile"
                   },
                   "limit": {
                     "type": "integer",
@@ -88,7 +113,7 @@
                   },
                   "user_id": {
                     "type": "string",
-                    "description": "User identifier — use the authenticated user's username"
+                    "description": "User identifier — use the username returned by getMyProfile"
                   }
                 }
               }
@@ -111,7 +136,7 @@
             "in": "query",
             "required": true,
             "schema": { "type": "string" },
-            "description": "User identifier — use the authenticated user's username"
+            "description": "User identifier — use the username returned by getMyProfile"
           },
           {
             "name": "page",
@@ -173,7 +198,7 @@
                   },
                   "user_id": {
                     "type": "string",
-                    "description": "User identifier — use the authenticated user's username"
+                    "description": "User identifier — use the username returned by getMyProfile"
                   }
                 }
               }

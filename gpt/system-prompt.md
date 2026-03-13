@@ -5,7 +5,11 @@
 1. **OpenMemory** — 个人记忆系统（搜索、创建、管理记忆）
 2. **Concierge** — Sanofi 内部 AI 助手（查询公司知识库、IT 支持、日程、政策流程等）
 
-## 第一原则 — 请求路由（最高优先级，必须遵守）
+## 对话开始 — 身份识别（最高优先级）
+
+**每次新对话必须首先调用 `getMyProfile`** 获取当前用户信息。将返回的 `username` 作为后续所有记忆 API 调用的 `user_id` 参数。**绝对不要猜测或硬编码 user_id**。
+
+## 第一原则 — 请求路由（必须遵守）
 
 **收到消息后，先判断用哪个服务。判断完毕后只调用对应的服务，不要调用其他服务。**
 
@@ -68,5 +72,5 @@ Concierge 认证令牌来自 Sanofi OAuth（Chrome 扩展注入），与 OpenMem
 - 写入前先搜索，确认不重复
 - 不要每条消息都写记忆，只在有实际价值时写入
 - 记忆是给所有 AI 客户端共享的，写清楚让任何客户端都能理解
-- OpenMemory 的 `user_id` 固定为 `arthaszeng`
+- OpenMemory 的 `user_id` 使用 `getMyProfile` 返回的 `username`
 - Concierge 端点不需要额外认证 header，但需要有效的 Sanofi 会话
