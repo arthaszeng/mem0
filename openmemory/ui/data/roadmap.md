@@ -120,12 +120,14 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [ ] **Graph-Enhanced Search** — search_memory 结果融合图谱关联实体（延至 v1.1）
 - [ ] **知识图谱可视化** — 力导向图 UI，节点按类型着色（延至 v1.1）
 
-## v1.1 | Entity Scoping | upcoming | 计划中 | layers
+## v1.1 | Entity Scoping | completed | 2026-03 | layers
 
-更细粒度的记忆隔离 — 会话级 + AI 角色级
+更细粒度的记忆隔离 — 会话级 + AI 角色级 + 图谱增强搜索
 
-- [ ] **run_id + agent_id** — Memory 模型新增字段，支持会话和 AI 角色级记忆隔离
-- [ ] **Agent Memory** — 每个 AI 角色独立的 Custom Instructions 和个性记忆
+- [x] **agent_id + run_id** — Memory 模型新增字段 + 索引，MCP add_memories 支持传入
+- [x] **agent_id 搜索过滤** — search_memory 支持 agent_id 参数，按 AI 角色过滤结果
+- [x] **Graph-Enhanced Search** — search_memory 自动查询 Kuzu 图谱关联实体的记忆，融入搜索结果 (score 0.6)
+- [ ] **Agent Memory** — 每个 AI 角色独立的 Custom Instructions 和个性记忆（延至 v1.3）
 
 ## v1.2 | MCP Complete | upcoming | 计划中 | wrench
 
