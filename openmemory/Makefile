@@ -48,5 +48,11 @@ migrate:
 downgrade:
 	docker compose exec api alembic downgrade -1
 
+test:
+	cd api && python -m pytest tests/ -v --tb=short
+
+test-cov:
+	cd api && python -m pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+
 ui-dev:
 	cd ui && NEXT_PUBLIC_USER_ID=$(USER) NEXT_PUBLIC_API_URL=$(NEXT_PUBLIC_API_URL) pnpm install && pnpm dev

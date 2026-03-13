@@ -3,11 +3,17 @@ import os
 from app.database import Base, engine
 from app.mcp_server import setup_mcp_server
 from app.routers import apps_router, backup_router, config_router, domains_router, memories_router, projects_router, stats_router
+from app.version import __version__
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_pagination import add_pagination
 
-app = FastAPI(title="OpenMemory API")
+app = FastAPI(title="OpenMemory API", version=__version__)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": __version__}
 
 _cors_origins = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost").split(",") if o.strip()]
 app.add_middleware(
