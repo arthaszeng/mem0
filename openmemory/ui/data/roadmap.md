@@ -109,14 +109,16 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [ ] **Reranking 重排序** — Jina / Cohere Reranker 对候选重排（延至 v1.x）
 - [ ] **Memory Filtering** — LLM 判断搜索结果与查询的高度相关性（延至 v1.x）
 
-## v1.0 | Graph Memory | upcoming | 计划中 | git-branch
+## v1.0 | Graph Memory | completed | 2026-03 | git-branch
 
-从扁平记忆到结构化知识网络 — 实体关系 + 多跳推理
+从扁平记忆到结构化知识网络 — Kuzu 图数据库 + 实体关系
 
-- [ ] **Kuzu Graph Store** — 嵌入式图数据库集成，零运维，与 SQLite 哲学一致
-- [ ] **实体关系提取** — LLM 自动提取人名/项目/技术/地点及其关系
-- [ ] **Graph-Enhanced Search** — 向量搜索 + 图遍历，返回关联实体和关系链
-- [ ] **知识图谱可视化** — 力导向图 UI，节点按类型着色，点击展开关联记忆
+- [x] **Kuzu Graph Store** — 嵌入式图数据库集成，零运维，无 pandas 依赖，原生 cursor API
+- [x] **实体关系提取** — gpt-4o-mini 自动提取 person/project/technology/organization/concept/place 实体及关系
+- [x] **后台自动建图** — 写入记忆时后台线程自动提取实体写入 Kuzu 图
+- [x] **MCP Entity Tools** — search_entities + list_graph_entities 两个新 MCP 工具
+- [ ] **Graph-Enhanced Search** — search_memory 结果融合图谱关联实体（延至 v1.1）
+- [ ] **知识图谱可视化** — 力导向图 UI，节点按类型着色（延至 v1.1）
 
 ## v1.1 | Entity Scoping | upcoming | 计划中 | layers
 

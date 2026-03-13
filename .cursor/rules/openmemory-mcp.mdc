@@ -17,10 +17,12 @@ alwaysApply: false
 | `list_memories` | 无 | 列出全部（慎用） |
 | `delete_memories` | `memory_ids: list[str]` | 按 ID 删除 |
 | `delete_all_memories` | 无 | 清空全部（危险） |
+| `search_entities` | `query: str, limit: int=20` | 在知识图谱中搜索实体及其关系 |
+| `list_graph_entities` | `limit: int=100` | 列出知识图谱中所有实体 |
 
 ## 修改 MCP 工具时的检查清单
 
-- [ ] ADD/UPDATE 事件后触发 `categorize_memory_background`
+- [ ] ADD/UPDATE 事件后触发 `categorize_memory_background` 和 `_run_entity_extraction_in_background`
 - [ ] MCP 中用 `threading.Thread(daemon=True)` 跑后台任务（无法用 BackgroundTasks）
 - [ ] REST API 对应端点同步修改，保持双通道一致
 - [ ] Qdrant payload 字段名使用 snake_case

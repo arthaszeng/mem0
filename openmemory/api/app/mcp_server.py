@@ -70,6 +70,24 @@ def _run_categorization_in_background(memory_id: uuid.UUID, content: str):
     t.start()
 
 
+def _run_entity_extraction_in_background(memory_id: uuid.UUID, content: str):
+    import threading
+
+    def _extract():
+        try:
+            from app.utils.entity_extraction import extract_entities
+            from app.utils.graph_store import add_entities
+            result = extract_entities(content)
+            if result.get("entities"):
+                add_entities(result["entities"], result.get("relations", []), str(memory_id))
+                logging.info("Extracted %d entities from memory %s", len(result["entities"]), memory_id)
+        except Exception as e:
+            logging.warning("Entity extraction failed for %s: %s", memory_id, e)
+
+    t = threading.Thread(target=_extract, daemon=True)
+    t.start()
+
+
 async def _memory_write_worker():
     """Drain the queue and process memory writes one-by-one in a thread."""
     q = _get_queue()
@@ -219,6 +237,10 @@ async def _memory_write_worker():
                         _run_categorization_in_background(mid, content)
                     except Exception as cat_err:
                         logging.warning(f"Categorization schedule failed for {mid}: {cat_err}")
+                    try:
+                        _run_entity_extraction_in_background(mid, content)
+                    except Exception as ge_err:
+                        logging.warning(f"Entity extraction schedule failed for {mid}: {ge_err}")
 
                 logging.info(f"Memory worker processed write for user={uid}: {len(response.get('results', []))} results")
             finally:
@@ -793,6 +815,39 @@ async def run_agent_task(prompt: str) -> str:
         return "LangGraph agent service is not running. Start it first."
     except Exception as e:
         return f"Agent error: {e}"
+
+
+@mcp.tool(description="Search the knowledge graph for entities (people, projects, technologies) and their relationships. Use when the user asks about connections between concepts or wants to explore related knowledge.")
+async def search_entities(query: str, limit: int = 20) -> str:
+    """
+    Args:
+        query: Entity name or substring to search for.
+        limit: Maximum number of entities to return.
+    """
+    try:
+        from app.utils.graph_store import search_entities as _search
+        results = await asyncio.to_thread(_search, query, limit)
+        if not results:
+            return json.dumps({"entities": [], "message": "No matching entities found"})
+        return json.dumps({"entities": results}, indent=2)
+    except Exception as e:
+        logging.exception(e)
+        return f"Error searching entities: {e}"
+
+
+@mcp.tool(description="List all entities in the knowledge graph. Shows people, projects, technologies and other concepts extracted from memories.")
+async def list_graph_entities(limit: int = 100) -> str:
+    """
+    Args:
+        limit: Maximum number of entities to return.
+    """
+    try:
+        from app.utils.graph_store import list_entities as _list
+        results = await asyncio.to_thread(_list, limit)
+        return json.dumps({"entities": results, "total": len(results)}, indent=2)
+    except Exception as e:
+        logging.exception(e)
+        return f"Error listing entities: {e}"
 
 
 def _read_gateway_user(request: Request) -> str:
