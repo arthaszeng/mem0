@@ -10,6 +10,11 @@ import secrets
 from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 
+
+def _utcnow():
+    """Naive UTC datetime for SQLite compatibility."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -64,21 +69,51 @@ def protected_resource_metadata(service_name: str, request: Request):
 @router.post("/register")
 def register_client(body: OAuthClientRegistrationRequest, db: Session = Depends(get_db)):
     client_id = secrets.token_urlsafe(24)
+
+    raw_secret = None
+    secret_hash = None
+    if body.token_endpoint_auth_method == "client_secret_post":
+        raw_secret = secrets.token_urlsafe(32)
+        secret_hash = bcrypt.hashpw(raw_secret.encode(), bcrypt.gensalt()).decode()
+
     client = OAuthClient(
         client_id=client_id,
         client_name=body.client_name or f"dynamic-{client_id[:8]}",
+        client_secret_hash=secret_hash,
         redirect_uris=json.dumps(body.redirect_uris),
         grant_types=json.dumps(body.grant_types),
         is_dynamic=True,
     )
     db.add(client)
     db.commit()
-    return {
+
+    result = {
         "client_id": client_id,
         "client_name": client.client_name,
         "redirect_uris": body.redirect_uris,
         "grant_types": body.grant_types,
         "token_endpoint_auth_method": body.token_endpoint_auth_method,
+    }
+    if raw_secret:
+        result["client_secret"] = raw_secret
+    return result
+
+
+class UpdateClientRequest(_BaseModel):
+    redirect_uris: list[str]
+
+
+@router.put("/clients/{client_id}")
+def update_client(client_id: str, body: UpdateClientRequest, db: Session = Depends(get_db)):
+    client = db.query(OAuthClient).filter(OAuthClient.client_id == client_id).first()
+    if not client:
+        raise HTTPException(404, "Client not found")
+    client.redirect_uris = json.dumps(body.redirect_uris)
+    db.commit()
+    return {
+        "client_id": client.client_id,
+        "client_name": client.client_name,
+        "redirect_uris": body.redirect_uris,
     }
 
 
@@ -175,7 +210,7 @@ async def _authorize_submit_async(request: Request, db: Session):
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
         scopes=scope,
-        expires_at=datetime.now(UTC) + timedelta(seconds=AUTH_CODE_EXPIRE_SECONDS),
+        expires_at=_utcnow() + timedelta(seconds=AUTH_CODE_EXPIRE_SECONDS),
     )
     db.add(auth_code)
     db.commit()
@@ -203,7 +238,13 @@ def _verify_pkce(code_challenge: str, code_verifier: str) -> bool:
 
 
 @router.post("/token")
-def token(body: TokenRequest, db: Session = Depends(get_db)):
+async def token(request: Request, db: Session = Depends(get_db)):
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+        body = TokenRequest(**{k: v for k, v in form.items()})
+    else:
+        body = TokenRequest(**(await request.json()))
     if body.grant_type == "authorization_code":
         return _handle_authorization_code(body, db)
     elif body.grant_type == "refresh_token":
@@ -233,7 +274,7 @@ def _handle_authorization_code(body: TokenRequest, db: Session):
 
     if not auth_code:
         raise HTTPException(400, "Invalid authorization code")
-    if auth_code.expires_at < datetime.now(UTC):
+    if auth_code.expires_at < _utcnow():
         raise HTTPException(400, "Authorization code expired")
     if auth_code.client_id != body.client_id:
         raise HTTPException(400, "client_id mismatch")
@@ -267,7 +308,7 @@ def _handle_authorization_code(body: TokenRequest, db: Session):
         user_id=user.id,
         client_id=body.client_id,
         scopes=auth_code.scopes,
-        expires_at=datetime.now(UTC) + timedelta(seconds=REFRESH_TOKEN_EXPIRE_SECONDS),
+        expires_at=_utcnow() + timedelta(seconds=REFRESH_TOKEN_EXPIRE_SECONDS),
     )
     db.add(rt)
     db.commit()
@@ -290,7 +331,7 @@ def _handle_refresh_token(body: TokenRequest, db: Session):
         RefreshToken.revoked == False,
     ).first()
 
-    if not rt or rt.expires_at < datetime.now(UTC):
+    if not rt or rt.expires_at < _utcnow():
         raise HTTPException(400, "Invalid or expired refresh token")
 
     user = db.query(User).filter(User.id == rt.user_id).first()
@@ -314,7 +355,7 @@ def _handle_refresh_token(body: TokenRequest, db: Session):
         user_id=user.id,
         client_id=rt.client_id,
         scopes=rt.scopes,
-        expires_at=datetime.now(UTC) + timedelta(seconds=REFRESH_TOKEN_EXPIRE_SECONDS),
+        expires_at=_utcnow() + timedelta(seconds=REFRESH_TOKEN_EXPIRE_SECONDS),
     )
     db.add(new_rt)
     db.commit()

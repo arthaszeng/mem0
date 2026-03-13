@@ -25,7 +25,7 @@
 3. 若已连接，用 `conciergeChat` 对话或 `conciergeSearch` 搜索
 4. 保持 `thread_id` 维持多轮上下文
 
-Concierge 认证令牌来自 Sanofi OAuth（Chrome 扩展注入），与 OpenMemory API Key 完全独立。
+Concierge 认证令牌来自 Sanofi OAuth（Chrome 扩展注入），与 OpenMemory OAuth2 令牌完全独立。
 
 ## OpenMemory 使用
 

@@ -7,11 +7,11 @@
 | 服务 | HTTP (MCP SSE) | REST API |
 |------|----------------|----------|
 | OpenMemory MCP | `http://<host>/memory-mcp/{client}/sse/{user_id}` | — |
-| OpenMemory API | — | `/api/v1/memories/` (需 X-API-Key) |
+| OpenMemory API | — | `/api/v1/memories/` (需 OAuth2 Bearer token) |
 | Concierge MCP | `http://<host>/concierge-mcp/sse` | — |
 | Concierge API | — | `/concierge-mcp/api/chat`, `/concierge-mcp/api/search` (需 Sanofi 会话) |
 
-> `<host>` = `47.108.141.20`（IP 直连）或 `arthaszeng.top`（需 ICP 备案后才能用域名）
+> `<host>` = `arthaszeng.top`（域名已完成 ICP 备案）或 `47.108.141.20`（IP 直连）
 
 ## 接入方式
 
@@ -51,58 +51,88 @@
 
 ### 2. ChatGPT Custom GPT（Actions / REST API）
 
-适用于 OpenAI ChatGPT 自定义 GPT。因 GPT Actions 不支持 SSE，通过 REST API 接入。
-一个 GPT 同时接入 OpenMemory + Concierge（ChatGPT 限制：每个 GPT 只有一个 Instructions、同域名只能归属一个 Action）。
+因 GPT Actions 不支持 SSE，通过 REST API 接入。有两个版本：
+
+#### 2a. 公开版 — OpenMemory GPT（仅记忆，OAuth2）
+
+面向公网发布的 GPT，仅包含 OpenMemory 记忆功能。用户通过 OAuth2 登录认证。
+
+**配置文件**:
+- OpenAPI Schema: [`chatgpt-action-schema-public.json`](./chatgpt-action-schema-public.json)
+- System Prompt: [`system-prompt-public.md`](./system-prompt-public.md)
+
+**设置步骤**:
+1. 在 ChatGPT 中创建自定义 GPT
+2. 粘贴 `system-prompt-public.md` 的内容作为 Instructions
+3. 在 Actions → Paste Schema 中导入 `chatgpt-action-schema-public.json`
+4. 配置 Authentication:
+   - Authentication Type: **OAuth**
+   - Client ID: 通过 auth-service 动态注册获取（见下方）
+   - Client Secret: 留空（public client）
+   - Authorization URL: `https://arthaszeng.top/auth/authorize`
+   - Token URL: `https://arthaszeng.top/auth/token`
+   - Scope: 留空
+5. 保存后 ChatGPT 会给你一个 Callback URL，需要注册到 auth-service
+6. 点击 "Test" 验证 `searchMemories` 能正常调用
+
+**注册 OAuth Client**:
+
+```bash
+# 1. 获取 ChatGPT 的 callback URL（在 Actions 配置页面底部）
+#    格式类似: https://chatgpt.com/aip/<plugin-id>/oauth/callback
+
+# 2. 注册 OAuth client
+curl -X POST https://arthaszeng.top/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_name": "ChatGPT-OpenMemory-Public",
+    "redirect_uris": ["<ChatGPT-Callback-URL>"],
+    "grant_types": ["authorization_code", "refresh_token"],
+    "token_endpoint_auth_method": "none"
+  }'
+
+# 3. 返回的 client_id 填入 ChatGPT Actions 的 Client ID 字段
+```
+
+#### 2b. 私有版 — Arthas AI Platform GPT（记忆 + Concierge，Bearer token）
+
+仅 Arthas 个人使用，包含 OpenMemory + Concierge 双服务。使用长期 JWT Bearer token 认证。
 
 **配置文件**:
 - OpenAPI Schema: [`chatgpt-action-schema.json`](./chatgpt-action-schema.json)
 - System Prompt: [`system-prompt.md`](./system-prompt.md)
 
 **设置步骤**:
-1. 在 ChatGPT 中创建自定义 GPT
+1. 在 ChatGPT 中创建自定义 GPT（不发布，仅自己可见）
 2. 粘贴 `system-prompt.md` 的内容作为 Instructions
 3. 在 Actions → Paste Schema 中导入 `chatgpt-action-schema.json`
 4. 配置 Authentication:
    - Authentication Type: **API Key**
-   - API Key: 服务器上 `docker exec openmemory-openmemory-mcp-1 env | grep API_KEY` 的值
-   - Auth Type: **Custom**
-   - Custom Header Name: `X-API-Key`
+   - API Key: 从 auth-service 签发的长期 JWT token（见下方）
+   - Auth Type: **Bearer**
 5. 点击 "Test" 验证 `searchMemories` 和 `conciergeAuthStatus` 能正常调用
 
-> Concierge 端点会收到 X-API-Key header（ChatGPT 全局发送），但 Concierge 不校验该 header，不影响功能。
-> Concierge 使用前需通过 Chrome 扩展完成 Sanofi 认证。
-
-**Cloudflare Tunnel（绕过 ICP）**:
-
-ChatGPT Actions 从海外服务器发起请求，域名未备案时阿里云网关返回 403，
-IP 直连又有 SSL 证书不匹配问题。Cloudflare Tunnel 从服务器主动向外建连，
-完全绕过 ICP 入站拦截。
-
-Tunnel 已作为 systemd 服务运行，开机自启：
+**生成长期 JWT Token**:
 
 ```bash
-# 查看当前 Tunnel URL（Quick Tunnel 每次重启 URL 会变）
+# 通过 auth-service 登录获取 token，或直接在服务器上签发长期 token：
 ssh -i ~/.ssh/arthas admin@47.108.141.20 \
-  "sudo journalctl -u cloudflared-tunnel --no-pager -n 20 | grep trycloudflare"
-
-# 管理服务
-sudo systemctl status cloudflared-tunnel   # 查看状态
-sudo systemctl restart cloudflared-tunnel  # 重启（URL 会变）
-sudo systemctl stop cloudflared-tunnel     # 停止
+  "docker exec openmemory-auth-service-1 python -c \"
+from jwt_utils import sign_access_token
+token = sign_access_token(user_id=1, username='arthaszeng', scopes='', expires_seconds=31536000)
+print(token)
+\""
 ```
 
-> **注意**: Quick Tunnel 的 URL 在每次服务重启时会变化。
-> 如需固定 URL，可升级为 Cloudflare Named Tunnel（需 Cloudflare 账号登录）。
+> 上述命令签发有效期 1 年的 token。ChatGPT 会在每次 API 调用中发送 `Authorization: Bearer <token>`。
 
-**流量路径**: ChatGPT → HTTPS → Cloudflare Edge → Tunnel → nginx:80 → 后端
+**流量路径**: ChatGPT → HTTPS → arthaszeng.top (nginx:443) → 后端
 
-Tunnel 现在指向 nginx HTTP (port 80)，nginx 根据路径路由到不同后端：
-- `/api/` → OpenMemory (port 8765)
-- `/concierge-mcp/` → Concierge (port 8767)
+> 域名已完成 ICP 备案，不再需要 Cloudflare Tunnel 绕行。
 
 **认证差异**:
-- OpenMemory API：需要 `X-API-Key` header（在 ChatGPT Actions 中配置）
-- Concierge API：需要服务器上有 Sanofi 活跃会话（通过 Chrome 扩展注入 token），无需额外 header
+- OpenMemory API：通过 Bearer JWT token 认证（nginx auth_request 校验）
+- Concierge API：需要服务器上有 Sanofi 活跃会话（通过 Chrome 扩展注入 token）
 
 ### 3. Lobe Chat（内置）
 

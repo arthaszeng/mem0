@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Arthas AI Platform (Private)",
-    "description": "OpenMemory (personal memory system) + Concierge (Sanofi AI assistant) — private use only",
-    "version": "2.1.0"
+    "title": "OpenMemory",
+    "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
+    "version": "1.0.0"
   },
   "servers": [
     {
@@ -15,7 +15,7 @@
       "post": {
         "operationId": "searchMemories",
         "summary": "Semantic search over memories",
-        "description": "Search personal memories by semantic similarity. Only call this for general questions or when user mentions past conversations. Do NOT call this when user explicitly requests Concierge — use conciergeChat/conciergeSearch instead.",
+        "description": "Search personal memories by semantic similarity. Use this to recall past conversations, preferences, decisions, or any stored knowledge.",
         "requestBody": {
           "required": true,
           "content": {
@@ -30,7 +30,7 @@
                   },
                   "user_id": {
                     "type": "string",
-                    "default": "arthaszeng"
+                    "description": "User identifier — use the authenticated user's username"
                   },
                   "limit": {
                     "type": "integer",
@@ -84,11 +84,11 @@
                 "properties": {
                   "text": {
                     "type": "string",
-                    "description": "Memory content — use complete Chinese sentences with full context"
+                    "description": "Memory content — use complete sentences with full context"
                   },
                   "user_id": {
                     "type": "string",
-                    "default": "arthaszeng"
+                    "description": "User identifier — use the authenticated user's username"
                   }
                 }
               }
@@ -110,7 +110,8 @@
             "name": "user_id",
             "in": "query",
             "required": true,
-            "schema": { "type": "string", "default": "arthaszeng" }
+            "schema": { "type": "string" },
+            "description": "User identifier — use the authenticated user's username"
           },
           {
             "name": "page",
@@ -172,7 +173,7 @@
                   },
                   "user_id": {
                     "type": "string",
-                    "default": "arthaszeng"
+                    "description": "User identifier — use the authenticated user's username"
                   }
                 }
               }
@@ -184,115 +185,21 @@
             "description": "Memory updated"
           }
         }
-      }
-    },
-    "/concierge-mcp/api/chat": {
-      "post": {
-        "operationId": "conciergeChat",
-        "summary": "Chat with Sanofi Concierge AI",
-        "description": "Send a message to the Sanofi Concierge AI. MUST use this (not searchMemories) when user says 'concierge', 'Concierge', or asks about Sanofi internal topics like schedules, IT support, policies, OneSupport, SharePoint. Requires an active Concierge session.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["message"],
-                "properties": {
-                  "message": {
-                    "type": "string",
-                    "description": "The message to send to Concierge AI"
-                  },
-                  "thread_id": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Thread ID for multi-turn conversations. Leave empty for new conversation."
-                  }
-                }
-              }
-            }
+      },
+      "delete": {
+        "operationId": "deleteMemory",
+        "summary": "Delete a memory",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
           }
-        },
+        ],
         "responses": {
           "200": {
-            "description": "Concierge response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "response": { "type": "string" },
-                    "thread_id": { "type": "string" }
-                  }
-                }
-              }
-            }
-          },
-          "401": { "description": "No active Concierge session" },
-          "502": { "description": "Concierge upstream error" }
-        }
-      }
-    },
-    "/concierge-mcp/api/search": {
-      "post": {
-        "operationId": "conciergeSearch",
-        "summary": "Search Sanofi knowledge base",
-        "description": "Search Sanofi internal resources (OneSupport, SharePoint, QualiPSO, etc.) via Concierge AI. Use this when user wants to search company knowledge base. Do NOT use searchMemories for Sanofi-related queries.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["query"],
-                "properties": {
-                  "query": {
-                    "type": "string",
-                    "description": "Search query for Sanofi internal knowledge base"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Search results",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "response": { "type": "string" },
-                    "query": { "type": "string" }
-                  }
-                }
-              }
-            }
-          },
-          "401": { "description": "No active Concierge session" },
-          "502": { "description": "Concierge upstream error" }
-        }
-      }
-    },
-    "/concierge-mcp/auth/status": {
-      "get": {
-        "operationId": "conciergeAuthStatus",
-        "summary": "Check Concierge auth status",
-        "description": "Check if there is an active Concierge session. If not connected, user must authenticate via Chrome extension first.",
-        "responses": {
-          "200": {
-            "description": "Auth status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "connected": { "type": "boolean" }
-                  }
-                }
-              }
-            }
+            "description": "Memory deleted"
           }
         }
       }
@@ -312,14 +219,19 @@
       }
     },
     "securitySchemes": {
-      "BearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT"
+      "OAuth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://arthaszeng.top/auth/authorize",
+            "tokenUrl": "https://arthaszeng.top/auth/token",
+            "scopes": {}
+          }
+        }
       }
     }
   },
   "security": [
-    { "BearerAuth": [] }
+    { "OAuth2": [] }
   ]
 }

@@ -59,10 +59,10 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 一套记忆，多端共享 — MCP Prompts + ChatGPT + Concierge Agent
 
 - [x] **6 个 MCP Prompts** — recall / briefing / project-context / who-am-i / review-memories / custom-instructions
-- [x] **ChatGPT Custom GPT** — OpenAPI Schema 定义 8 个 Actions，ChatGPT 直接读写 OpenMemory
+- [x] **ChatGPT Custom GPT** — OpenAPI Schema 定义 Actions，ChatGPT 直接读写 OpenMemory
+- [x] **GPT 公开版 + 私有版** — 公开版仅记忆 (OAuth2)，私有版含 Concierge (Bearer JWT)，双 schema 双 prompt
 - [x] **Concierge LangGraph Agent** — 独立的 AI 代理服务，通过 LangGraph 编排多步对话和记忆操作
 - [x] **Chrome 扩展** — Concierge 浏览器扩展，popup 界面连接云端 MCP，随时随地对话
-- [x] **ICP Tunnel 绕行** — 阿里云 80/443 端口被 ICP 拦截，通过 Tunnel 方案让 ChatGPT Actions 正常访问
 
 ## v0.6 | Multi-User Auth | completed | 2026-03 | shield
 
@@ -75,6 +75,8 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **项目邀请系统** — 可分享链接邀请用户加入项目，支持指定角色和过期时间
 - [x] **数据隔离安全修复** — 修复 archive 无认证 / delete 无所有权校验 / global_pause 影响全局 三个安全漏洞
 - [x] **Chrome 扩展 OAuth** — Concierge 浏览器扩展集成 OAuth 认证流程，支持多用户切换
+- [x] **OAuth Client Secret** — 动态注册支持 client_secret 生成，兼容 ChatGPT 等需要密钥的 OAuth 客户端
+- [x] **Token 端点 Form 兼容** — /auth/token 同时支持 JSON 和 x-www-form-urlencoded，符合 OAuth2 标准
 
 ## v0.7 | Memory Quality | in_progress | 进行中 | brain
 
