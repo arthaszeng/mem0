@@ -90,9 +90,10 @@ class TestTTLCleanup:
 
 class TestRegressions:
     def test_health_endpoint(self, client):
+        from app.version import __version__
         r = client.get("/health")
         assert r.status_code == 200
-        assert r.json()["version"] == "0.8.0"
+        assert r.json()["version"] == __version__
 
     def test_list_memories(self, client):
         r = client.get("/api/v1/memories/")

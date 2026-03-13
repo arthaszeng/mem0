@@ -98,14 +98,16 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **Alembic 迁移** — v0_8_lifecycle 迁移添加 expires_at / memory_type 列和索引
 - [ ] **ArchivePolicy 自动化** — 按 app / category / domain 设置差异化归档策略（延至 v1.x）
 
-## v0.9 | Advanced Retrieval | upcoming | 计划中 | search
+## v0.9 | Advanced Retrieval | completed | 2026-03 | search
 
-从「能搜到」到「搜得准」— 混合检索 + 重排序
+从「能搜到」到「搜得准」— 混合检索 + 过滤
 
-- [ ] **Keyword + Vector 混合检索** — Qdrant Full-Text Index + 向量搜索双通道，合并去重排序
-- [ ] **Reranking 重排序** — Jina / Cohere Reranker 对 top-20 候选重排，精准返回 top-5
-- [ ] **Memory Filtering** — LLM 判断搜索结果与查询的高度相关性，过滤语义漂移
-- [ ] **MCP Search 增强** — search_memory 支持 limit / keyword_search / rerank / categories 参数
+- [x] **Keyword + Vector 混合检索** — 向量搜索 + SQLite LIKE 关键词搜索 + 域增强三通道，合并去重按 score 排序
+- [x] **MCP Search 增强** — search_memory 支持 limit / categories / memory_type 参数，结果可精确过滤
+- [x] **Category 过滤** — 按逗号分隔的 category 名称过滤搜索结果
+- [x] **Memory Type 过滤** — 按 fact / preference / session / episodic 类型过滤
+- [ ] **Reranking 重排序** — Jina / Cohere Reranker 对候选重排（延至 v1.x）
+- [ ] **Memory Filtering** — LLM 判断搜索结果与查询的高度相关性（延至 v1.x）
 
 ## v1.0 | Graph Memory | upcoming | 计划中 | git-branch
 
