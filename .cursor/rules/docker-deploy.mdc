@@ -1,41 +1,78 @@
 ---
-description: Docker 部署与容器管理规范
-globs: openmemory/docker-compose.yml, openmemory/Dockerfile, openmemory/**/Dockerfile
+description: Docker 部署、构建与版本管理规范
+globs: docker-compose*.yml, **/Dockerfile, VERSION, .env*
 alwaysApply: false
 ---
 
-# Docker 部署规范
+# Docker 部署与版本管理规范
+
+## 版本管理
+
+- **唯一版本来源**: 项目根目录 `VERSION` 文件
+- **环境变量**: `.env.local`（本地）和 `.env.cloud`（云端）中的 `APP_VERSION` 保持与 VERSION 一致
+- **版本递增规则**:
+  - Patch（小改动）: 1.6.0 → 1.6.1
+  - Minor（Epic 功能）: 1.6.0 → 1.7.0
+  - Major（Release）: 1.6.0 → 2.0.0
+- **每次代码变更必须**: bump 版本 → commit → 确保 git 干净 → 构建镜像
 
 ## 服务架构
 
-| 容器 | 镜像 | 端口 | 职责 |
-|------|------|------|------|
+| 容器 | 镜像名 | 端口 | 职责 |
+|------|--------|------|------|
 | `mem0_store` | qdrant/qdrant | 6333 | 向量数据库 |
-| `openmemory-mcp` | 自建 | 8765 | API + MCP Server |
-| `openmemory-ui` | 自建 | 3001 | Web 管理界面 |
+| `openmemory-mcp` | openmemory-mcp | 8765 | API + MCP Server |
+| `openmemory-ui` | openmemory-ui | 3001 | Web 管理界面 |
+| `auth-service` | auth-service | 8766 | 认证服务 |
+| `concierge-mcp` | concierge-mcp | 8767 | Concierge MCP |
+| `nginx` | nginx | 80 | 反向代理 |
 
-宿主机上还运行 **Ollama**（port 11434），不在 Docker Compose 中。
-
-## 常用操作
+## 构建与推送（必须在项目根目录 `mem0/` 执行）
 
 ```bash
-# 工作目录
-cd <project-root>/openmemory
+# 1. 读取版本
+VERSION=$(cat VERSION)
 
-# 重建并重启单个服务（修改代码后）
-docker compose up -d --build openmemory-mcp
+# 2. 构建所有镜像（带版本 tag）
+APP_VERSION=$VERSION docker compose -f docker-compose.local.yml build
 
-# 查看日志
-docker compose logs openmemory-mcp --tail=100 -f
+# 3. 给所有镜像打 ACR tag（namespace: arthaszeng）
+ACR=crpi-xsgmoqneyleca8gg.cn-chengdu.personal.cr.aliyuncs.com
+for svc in openmemory-mcp openmemory-ui auth-service concierge-mcp; do
+  docker tag "mem0/${svc}:${VERSION}" "${ACR}/arthaszeng/${svc}:${VERSION}"
+  docker tag "mem0/${svc}:${VERSION}" "${ACR}/arthaszeng/${svc}:latest"
+done
 
-# 进入容器调试
-docker exec -it openmemory-openmemory-mcp-1 bash
+# 4. 推送到 ACR
+docker login --username=cheery_arthas ${ACR}
+for svc in openmemory-mcp openmemory-ui auth-service concierge-mcp; do
+  docker push "${ACR}/arthaszeng/${svc}:${VERSION}"
+  docker push "${ACR}/arthaszeng/${svc}:latest"
+done
 ```
+
+## 云端部署（47.108.141.20）
+
+```bash
+# 云端从 ACR 内网拉取镜像
+ACR_VPC=crpi-xsgmoqneyleca8gg-vpc.cn-chengdu.personal.cr.aliyuncs.com
+docker pull ${ACR_VPC}/arthaszeng/openmemory-mcp:latest
+# ... 其他服务类似
+```
+
+## 关键规则
+
+- **所有 docker compose 命令在项目根目录 `mem0/` 执行**，不要进 `openmemory/` 子目录
+- Mac Mini 和云服务器都是 arm64，**同一份镜像通用**
+- 镜像必须同时有 `:版本号` 和 `:latest` 两个 tag
+- ACR 公网: `crpi-xsgmoqneyleca8gg.cn-chengdu.personal.cr.aliyuncs.com`
+- ACR 内网: `crpi-xsgmoqneyleca8gg-vpc.cn-chengdu.personal.cr.aliyuncs.com`
+- ACR namespace: `arthaszeng`
 
 ## 注意事项
 
-- 修改 Python 代码后必须 `--build` 重建，镜像不会自动更新
-- 容器访问宿主机 Ollama 使用 `host.docker.internal:11434`
-- Qdrant 数据持久化在 Docker volume `mem0_store` 中
+- 修改代码后必须 `--build` 重建，镜像不会自动更新
+- 容器访问宿主机服务使用 `host.docker.internal`
+- Qdrant 数据持久化在 Docker volume 中
 - SQLite 数据库路径 `/data/openmemory.db`（容器内）
 - 重启容器后 Cursor 的 MCP SSE 连接会断开，需要手动重连
