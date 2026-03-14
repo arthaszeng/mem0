@@ -35,6 +35,7 @@ import { Label } from "@/components/ui/label";
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 const GLOBAL_ROUTES = ["/login", "/change-password", "/settings", "/invite"];
+const LAST_PROJECT_KEY = "om_last_project";
 
 function extractProjectSlug(pathname: string): string {
   if (GLOBAL_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"))) return "";
@@ -92,7 +93,10 @@ export function Navbar() {
     } else {
       setIsSuperadmin(false);
     }
-  }, [loadProjects, pathname]);
+    if (projectSlug) {
+      localStorage.setItem(LAST_PROJECT_KEY, projectSlug);
+    }
+  }, [loadProjects, pathname, projectSlug]);
 
   const currentProject = projects.find((p) => p.slug === projectSlug);
   const canInvite = isSuperadmin || currentProject?.my_role === "owner" || currentProject?.my_role === "admin";
@@ -234,6 +238,7 @@ export function Navbar() {
   };
 
   const handleSwitchProject = (slug: string) => {
+    localStorage.setItem(LAST_PROJECT_KEY, slug);
     const segments = pathname.split("/").filter(Boolean);
     if (segments.length === 0 || GLOBAL_ROUTES.some((r) => pathname.startsWith(r))) {
       router.push(`/${slug}`);

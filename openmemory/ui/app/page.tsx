@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 
+const LAST_PROJECT_KEY = "om_last_project";
+
 export default function RootPage() {
   const router = useRouter();
   const [error, setError] = useState("");
@@ -13,11 +15,13 @@ export default function RootPage() {
       .get("/api/v1/projects")
       .then((res) => {
         const projects = res.data;
-        if (projects.length > 0) {
-          router.replace(`/${projects[0].slug}`);
-        } else {
+        if (projects.length === 0) {
           setError("No projects found. Create one first.");
+          return;
         }
+        const saved = localStorage.getItem(LAST_PROJECT_KEY);
+        const match = saved && projects.find((p: any) => p.slug === saved);
+        router.replace(`/${match ? match.slug : projects[0].slug}`);
       })
       .catch(() => setError("Failed to load projects"));
   }, [router]);

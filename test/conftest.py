@@ -118,6 +118,16 @@ def create_memory(token: str, content: str, project_slug: str | None = None, **e
     return r
 
 
+def api_upload(token: str, path: str, filename: str, content: bytes, **kwargs) -> httpx.Response:
+    """Upload a file via multipart/form-data."""
+    return _retry(lambda: _client.post(
+        f"{BASE_URL}{path}",
+        headers=_headers(token),
+        files={"file": (filename, content, "application/zip")},
+        **kwargs,
+    ))
+
+
 def purge_user(admin_token: str, username: str):
     """Best-effort cleanup of a test user and all associated data."""
     api_delete(admin_token, f"/api/v1/projects/admin/users/{username}/purge")

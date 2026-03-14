@@ -663,6 +663,10 @@ async def import_backup(
             db.refresh(cat)
         cat_id_map[c["id"]] = cat.id
 
+    # --- Detect cross-user import ---
+    export_user_id_str = sqlite_data.get("user", {}).get("id")
+    is_cross_user = export_user_id_str and str(user.id) != export_user_id_str
+
     # --- Import memories (SQLite — synchronous, fast) ---
     old_to_new_id: Dict[str, UUID] = {}
     app_for_memory: Dict[str, str] = {}
@@ -673,7 +677,7 @@ async def import_backup(
         incoming_id = UUID(m["id"])
         existing = db.query(Memory).filter(Memory.id == incoming_id).first()
 
-        if existing and existing.user_id != user.id:
+        if is_cross_user or (existing and existing.user_id != user.id):
             target_id = uuid4()
         else:
             target_id = incoming_id
@@ -790,6 +794,8 @@ async def import_backup(
         rec_app_name = rec.get("app") or rec.get("app_name") or app_for_memory.get(old_id, "openmemory")
 
         payload = dict(metadata)
+        for stale_key in ("creator_username", "owner", "exported_by"):
+            payload.pop(stale_key, None)
         payload["data"] = rec_content
         if created_at:
             payload["created_at"] = created_at
