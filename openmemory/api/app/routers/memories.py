@@ -650,6 +650,8 @@ async def create_memory(
     logging.info(f"Creating memory for user: {auth.username} with app: {request.app}")
 
     safe_text = sanitize_text(request.text)
+    if not safe_text or not safe_text.strip():
+        raise HTTPException(status_code=400, detail="Memory text must not be empty or whitespace-only")
 
     try:
         memory_client = get_memory_client()
@@ -657,9 +659,7 @@ async def create_memory(
             raise Exception("Memory client is not available")
     except Exception as client_error:
         logging.warning(f"Memory client unavailable: {client_error}. Creating memory in database only.")
-        return {
-            "error": str(client_error)
-        }
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
 
     qdrant_meta = {
         "source_app": "openmemory",
@@ -749,10 +749,7 @@ async def create_memory(
                 return changed_memories[0]
     except Exception as qdrant_error:
         logging.warning(f"Qdrant operation failed: {qdrant_error}.")
-        # Return a json response with the error
-        return {
-            "error": str(qdrant_error)
-        }
+        raise HTTPException(status_code=502, detail=f"Memory storage error: {qdrant_error}")
 
 
 
@@ -1280,6 +1277,8 @@ async def update_memory(
     memory = get_memory_or_404(db, memory_id)
     if memory.user_id != auth.db_user.id and not auth.is_superadmin:
         raise HTTPException(403, "Cannot update another user's memory")
+    if not request.memory_content or not request.memory_content.strip():
+        raise HTTPException(400, "Memory content must not be empty or whitespace-only")
     memory.content = request.memory_content
     if request.memory_type is not None:
         memory.memory_type = request.memory_type

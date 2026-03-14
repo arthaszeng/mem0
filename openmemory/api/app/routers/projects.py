@@ -291,6 +291,51 @@ def add_member(
     return {"message": f"Added {body.username} as {role.value}"}
 
 
+class UpdateMemberRequest(BaseModel):
+    role: str
+
+
+@router.put("/{slug}/members/{username}")
+def update_member_role(
+    slug: str,
+    username: str,
+    body: UpdateMemberRequest,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    project = _get_project_or_404(db, slug)
+    _require_project_access(db, project, auth, ProjectRole.admin)
+
+    target_user = db.query(User).filter(User.user_id == username).first()
+    if not target_user:
+        raise HTTPException(404, "User not found")
+
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == target_user.id,
+    ).first()
+    if not member:
+        raise HTTPException(404, "Member not found")
+
+    try:
+        new_role = ProjectRole(body.role)
+    except ValueError:
+        raise HTTPException(400, f"Invalid role: {body.role}")
+
+    if member.role == ProjectRole.owner:
+        raise HTTPException(400, "Cannot change the owner's role. Transfer ownership first.")
+    if new_role == ProjectRole.owner:
+        raise HTTPException(400, "Cannot assign owner role via update. Use ownership transfer.")
+
+    caller_role = _get_member_role(db, project.id, auth.db_user.id)
+    if not auth.is_superadmin and ROLE_HIERARCHY.get(new_role, 0) >= ROLE_HIERARCHY.get(caller_role, 0):
+        raise HTTPException(403, "Cannot assign a role equal to or above your own")
+
+    member.role = new_role
+    db.commit()
+    return {"message": f"Updated {username} role to {new_role.value}"}
+
+
 @router.delete("/{slug}/members/{username}")
 def remove_member(
     slug: str,

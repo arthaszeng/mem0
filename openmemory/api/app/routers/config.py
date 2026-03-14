@@ -148,6 +148,21 @@ def save_config_to_db(db: Session, config: Dict[str, Any], key: str = "main"):
     db.refresh(db_config)
     return db_config.value
 
+def _mask_secrets(config: Dict[str, Any], is_superadmin: bool) -> Dict[str, Any]:
+    """Mask api_key fields for non-superadmin users."""
+    if is_superadmin:
+        return config
+    import copy
+    masked = copy.deepcopy(config)
+    for section in ("llm", "embedder"):
+        try:
+            if masked.get("mem0", {}).get(section, {}).get("config", {}).get("api_key"):
+                masked["mem0"][section]["config"]["api_key"] = "***"
+        except (TypeError, KeyError):
+            pass
+    return masked
+
+
 @router.get("/", response_model=ConfigSchema)
 async def get_configuration(
     db: Session = Depends(get_db),
@@ -155,7 +170,7 @@ async def get_configuration(
 ):
     """Get the current configuration."""
     config = get_config_from_db(db)
-    return config
+    return _mask_secrets(config, auth.is_superadmin)
 
 @router.put("/", response_model=ConfigSchema)
 async def update_configuration(
@@ -241,6 +256,11 @@ async def get_llm_configuration(
     """Get only the LLM configuration."""
     config = get_config_from_db(db)
     llm_config = config.get("mem0", {}).get("llm", {})
+    if not auth.is_superadmin:
+        import copy
+        llm_config = copy.deepcopy(llm_config)
+        if llm_config.get("config", {}).get("api_key"):
+            llm_config["config"]["api_key"] = "***"
     return llm_config
 
 @router.put("/mem0/llm", response_model=LLMProvider)
@@ -272,6 +292,11 @@ async def get_embedder_configuration(
     """Get only the Embedder configuration."""
     config = get_config_from_db(db)
     embedder_config = config.get("mem0", {}).get("embedder", {})
+    if not auth.is_superadmin:
+        import copy
+        embedder_config = copy.deepcopy(embedder_config)
+        if embedder_config.get("config", {}).get("api_key"):
+            embedder_config["config"]["api_key"] = "***"
     return embedder_config
 
 @router.put("/mem0/embedder", response_model=EmbedderProvider)

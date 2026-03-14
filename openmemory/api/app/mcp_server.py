@@ -358,6 +358,8 @@ async def add_memories(
         return "Error: user_id not provided"
     if not client_name:
         return "Error: client_name not provided"
+    if not text or not text.strip():
+        return "Error: text must not be empty or whitespace-only"
 
     memory_client = get_memory_client_safe()
     if not memory_client:
