@@ -47,7 +47,11 @@ def _slugify(name: str) -> str:
 
 def _ensure_default_project(db: Session, db_user: "User") -> None:
     """Create a personal default project for a user if none exists."""
+    from app.routers.projects import RESERVED_SLUGS
+
     slug = _slugify(db_user.user_id)
+    if slug in RESERVED_SLUGS:
+        slug = f"user-{slug}"
     existing = db.query(Project).filter(Project.slug == slug).first()
     if existing:
         already_member = db.query(ProjectMember).filter(

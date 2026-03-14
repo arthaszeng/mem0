@@ -43,8 +43,28 @@ class AddMemberRequest(BaseModel):
     role: str = "read_write"
 
 
+_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{0,62}[a-z0-9])?$")
+
+RESERVED_SLUGS = frozenset({
+    "login", "settings", "admin", "invite", "change-password",
+    "api", "api-keys", "projects", "memory", "memories", "apps",
+    "auth", "memory-mcp", "concierge-mcp", "health",
+})
+
+
 def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def _validate_slug(slug: str) -> None:
+    if not _SLUG_RE.match(slug):
+        raise HTTPException(
+            400,
+            "Slug must be 1–64 lowercase alphanumeric characters or hyphens, "
+            "starting and ending with an alphanumeric character.",
+        )
+    if slug in RESERVED_SLUGS:
+        raise HTTPException(400, f"Slug '{slug}' is reserved and cannot be used.")
 
 
 def _get_project_or_404(db: Session, slug: str) -> Project:
@@ -91,6 +111,7 @@ def create_project(
     db: Session = Depends(get_db),
 ):
     slug = body.slug or _slugify(body.name)
+    _validate_slug(slug)
     if db.query(Project).filter(Project.slug == slug).first():
         raise HTTPException(409, f"Project slug '{slug}' already exists")
 
@@ -290,6 +311,9 @@ def remove_member(
     ).first()
     if not member:
         raise HTTPException(404, "Member not found")
+
+    if member.role == ProjectRole.owner:
+        raise HTTPException(400, "Cannot remove the project owner. Transfer ownership first.")
 
     db.delete(member)
     db.commit()
