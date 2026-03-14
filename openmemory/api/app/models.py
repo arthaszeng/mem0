@@ -7,7 +7,6 @@ import sqlalchemy as sa
 from app.database import Base
 from sqlalchemy import (
     JSON,
-    UUID,
     Boolean,
     Column,
     DateTime,
@@ -18,8 +17,41 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+    types,
 )
 from sqlalchemy.orm import Session, relationship
+
+
+class UUIDString(types.TypeDecorator):
+    """UUID stored as 32-char hex in SQLite, matching the original UUID type behavior.
+
+    Accepts both UUID objects and string values (with or without dashes) on input,
+    always stores as 32-char hex (no dashes) for backward compatibility with
+    existing data written by SQLAlchemy's native UUID type.
+    """
+
+    impl = types.String(32)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if isinstance(value, uuid.UUID):
+            return value.hex
+        try:
+            return uuid.UUID(str(value)).hex
+        except (ValueError, AttributeError):
+            return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if isinstance(value, uuid.UUID):
+            return value
+        try:
+            return uuid.UUID(str(value))
+        except (ValueError, AttributeError):
+            return value
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +85,10 @@ class ProjectRole(enum.Enum):
 
 class Project(Base):
     __tablename__ = "projects"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
     name = Column(String, nullable=False)
     slug = Column(String, unique=True, nullable=False, index=True)
-    owner_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    owner_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
     description = Column(String, nullable=True)
     created_at = Column(DateTime, default=get_current_utc_time, index=True)
     updated_at = Column(DateTime, default=get_current_utc_time, onupdate=get_current_utc_time)
@@ -67,9 +99,9 @@ class Project(Base):
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    project_id = Column(UUID, ForeignKey("projects.id"), nullable=False, index=True)
-    user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    project_id = Column(UUIDString, ForeignKey("projects.id"), nullable=False, index=True)
+    user_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
     role = Column(Enum(ProjectRole), nullable=False, default=ProjectRole.read_write)
     created_at = Column(DateTime, default=get_current_utc_time)
 
@@ -90,13 +122,13 @@ class InviteStatus(enum.Enum):
 
 class ProjectInvite(Base):
     __tablename__ = "project_invites"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    project_id = Column(UUID, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    project_id = Column(UUIDString, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     token = Column(String, unique=True, nullable=False, index=True)
     role = Column(Enum(ProjectRole), nullable=False, default=ProjectRole.read_write)
     status = Column(Enum(InviteStatus), nullable=False, default=InviteStatus.pending)
-    created_by_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    accepted_by_id = Column(UUID, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
+    accepted_by_id = Column(UUIDString, ForeignKey("users.id"), nullable=True, index=True)
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=get_current_utc_time, index=True)
     accepted_at = Column(DateTime, nullable=True)
@@ -112,7 +144,7 @@ class ProjectInvite(Base):
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
     user_id = Column(String, nullable=False, unique=True, index=True)
     name = Column(String, nullable=True, index=True)
     email = Column(String, unique=True, nullable=True, index=True)
@@ -128,8 +160,8 @@ class User(Base):
 
 class App(Base):
     __tablename__ = "apps"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    owner_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    owner_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False, index=True)
     description = Column(String)
     metadata_ = Column('metadata', JSON, default=dict)
@@ -149,7 +181,7 @@ class App(Base):
 
 class Config(Base):
     __tablename__ = "configs"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
     key = Column(String, unique=True, nullable=False, index=True)
     value = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=get_current_utc_time)
@@ -160,10 +192,10 @@ class Config(Base):
 
 class Memory(Base):
     __tablename__ = "memories"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    app_id = Column(UUID, ForeignKey("apps.id"), nullable=False, index=True)
-    project_id = Column(UUID, ForeignKey("projects.id"), nullable=True, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    user_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
+    app_id = Column(UUIDString, ForeignKey("apps.id"), nullable=False, index=True)
+    project_id = Column(UUIDString, ForeignKey("projects.id"), nullable=True, index=True)
     content = Column(String, nullable=False)
     vector = Column(String)
     metadata_ = Column('metadata', JSON, default=dict)
@@ -197,7 +229,7 @@ class Memory(Base):
 
 class Category(Base):
     __tablename__ = "categories"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
     name = Column(String, unique=True, nullable=False, index=True)
     description = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.now(datetime.UTC), index=True)
@@ -209,19 +241,19 @@ class Category(Base):
 
 memory_categories = Table(
     "memory_categories", Base.metadata,
-    Column("memory_id", UUID, ForeignKey("memories.id"), primary_key=True, index=True),
-    Column("category_id", UUID, ForeignKey("categories.id"), primary_key=True, index=True),
+    Column("memory_id", UUIDString, ForeignKey("memories.id"), primary_key=True, index=True),
+    Column("category_id", UUIDString, ForeignKey("categories.id"), primary_key=True, index=True),
     Index('idx_memory_category', 'memory_id', 'category_id')
 )
 
 
 class AccessControl(Base):
     __tablename__ = "access_controls"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
     subject_type = Column(String, nullable=False, index=True)
-    subject_id = Column(UUID, nullable=True, index=True)
+    subject_id = Column(UUIDString, nullable=True, index=True)
     object_type = Column(String, nullable=False, index=True)
-    object_id = Column(UUID, nullable=True, index=True)
+    object_id = Column(UUIDString, nullable=True, index=True)
     effect = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, default=get_current_utc_time, index=True)
 
@@ -233,7 +265,7 @@ class AccessControl(Base):
 
 class ArchivePolicy(Base):
     __tablename__ = "archive_policies"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
     criteria_type = Column(String, nullable=False, index=True)
     criteria_id = Column(String, nullable=True, index=True)
     days_to_archive = Column(Integer, nullable=False)
@@ -246,9 +278,9 @@ class ArchivePolicy(Base):
 
 class AgentInstruction(Base):
     __tablename__ = "agent_instructions"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    user_id = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    project_id = Column(UUID, ForeignKey("projects.id"), nullable=True, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    user_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(UUIDString, ForeignKey("projects.id"), nullable=True, index=True)
     agent_id = Column(String, nullable=False, index=True)
     instructions = Column(String, nullable=False)
     created_at = Column(DateTime, default=get_current_utc_time, index=True)
@@ -261,9 +293,9 @@ class AgentInstruction(Base):
 
 class MemoryStatusHistory(Base):
     __tablename__ = "memory_status_history"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    memory_id = Column(UUID, ForeignKey("memories.id"), nullable=False, index=True)
-    changed_by = Column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    memory_id = Column(UUIDString, ForeignKey("memories.id"), nullable=False, index=True)
+    changed_by = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
     old_state = Column(Enum(MemoryState), nullable=False, index=True)
     new_state = Column(Enum(MemoryState), nullable=False, index=True)
     changed_at = Column(DateTime, default=get_current_utc_time, index=True)
@@ -276,9 +308,9 @@ class MemoryStatusHistory(Base):
 
 class MemoryAccessLog(Base):
     __tablename__ = "memory_access_logs"
-    id = Column(UUID, primary_key=True, default=lambda: uuid.uuid4())
-    memory_id = Column(UUID, ForeignKey("memories.id"), nullable=False, index=True)
-    app_id = Column(UUID, ForeignKey("apps.id"), nullable=False, index=True)
+    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
+    memory_id = Column(UUIDString, ForeignKey("memories.id"), nullable=False, index=True)
+    app_id = Column(UUIDString, ForeignKey("apps.id"), nullable=False, index=True)
     accessed_at = Column(DateTime, default=get_current_utc_time, index=True)
     access_type = Column(String, nullable=False, index=True)
     metadata_ = Column('metadata', JSON, default=dict)
