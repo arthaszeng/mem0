@@ -585,7 +585,7 @@ def _normalize_memory_record(m: dict) -> dict:
 
     Handles older exports that may use ``memory`` or ``text`` instead of
     ``content``, or lack fields added in v2 (project_slug, creator_username,
-    memory_type, agent_id, run_id, etc.).
+    run_id, etc.).
     """
     content = (
         m.get("content")
@@ -618,8 +618,6 @@ def _normalize_memory_record(m: dict) -> dict:
     m.setdefault("project_slug", None)
     m.setdefault("creator_username", None)
     m.setdefault("category_ids", [])
-    m.setdefault("memory_type", None)
-    m.setdefault("agent_id", None)
     m.setdefault("run_id", None)
     m.setdefault("expires_at", None)
     return m
@@ -809,10 +807,6 @@ async def import_backup(
                 existing.deleted_at = _parse_iso(m.get("deleted_at"))
                 existing.created_at = _parse_iso(m.get("created_at")) or existing.created_at
                 existing.updated_at = _parse_iso(m.get("updated_at")) or existing.updated_at
-                if m.get("memory_type"):
-                    existing.memory_type = m["memory_type"]
-                if m.get("agent_id"):
-                    existing.agent_id = m["agent_id"]
                 if m.get("run_id"):
                     existing.run_id = m["run_id"]
                 if m.get("expires_at"):
@@ -831,10 +825,6 @@ async def import_backup(
                 archived_at=_parse_iso(m.get("archived_at")),
                 deleted_at=_parse_iso(m.get("deleted_at")),
             )
-            if m.get("memory_type"):
-                mem_kwargs["memory_type"] = m["memory_type"]
-            if m.get("agent_id"):
-                mem_kwargs["agent_id"] = m["agent_id"]
             if m.get("run_id"):
                 mem_kwargs["run_id"] = m["run_id"]
             if m.get("expires_at"):

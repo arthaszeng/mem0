@@ -103,16 +103,12 @@ async def _memory_write_worker():
                 task_infer = task.get("infer", True)
                 task_instructions = task.get("instructions", "")
                 task_expires_at = task.get("expires_at", "")
-                task_memory_type = task.get("memory_type", "")
-                task_agent_id = task.get("agent_id", "")
                 task_run_id = task.get("run_id", "")
             else:
                 uid, client_name, text, task_project_slug = task[:4]
                 task_infer = task[4] if len(task) > 4 else True
                 task_instructions = task[5] if len(task) > 5 else ""
                 task_expires_at = ""
-                task_memory_type = ""
-                task_agent_id = ""
                 task_run_id = ""
 
             memory_client = get_memory_client_safe()
@@ -130,24 +126,10 @@ async def _memory_write_worker():
                     project_id, _ = _resolve_project(db, user.id)
                 finally:
                     project_slug_var.reset(pslug_token)
-
-                agent_instructions = None
-                if task_agent_id:
-                    q = db.query(AgentInstruction).filter(
-                        AgentInstruction.user_id == user.id,
-                        AgentInstruction.agent_id == task_agent_id,
-                    )
-                    if project_id:
-                        q = q.filter(AgentInstruction.project_id == uuid.UUID(project_id))
-                    else:
-                        q = q.filter(AgentInstruction.project_id.is_(None))
-                    row = q.first()
-                    if row:
-                        agent_instructions = row.instructions
             finally:
                 db.close()
 
-            effective_instructions = task_instructions or agent_instructions or ""
+            effective_instructions = task_instructions or ""
 
             qdrant_meta = {"source_app": "openmemory", "mcp_client": client_name}
             if project_id:
@@ -205,10 +187,6 @@ async def _memory_write_worker():
 
                             if parsed_expires:
                                 memory.expires_at = parsed_expires
-                            if task_memory_type:
-                                memory.memory_type = task_memory_type
-                            if task_agent_id:
-                                memory.agent_id = task_agent_id
                             if task_run_id:
                                 memory.run_id = task_run_id
 
@@ -239,10 +217,6 @@ async def _memory_write_worker():
 
                             if parsed_expires and memory:
                                 memory.expires_at = parsed_expires
-                            if task_memory_type and memory:
-                                memory.memory_type = task_memory_type
-                            if task_agent_id and memory:
-                                memory.agent_id = task_agent_id
                             if task_run_id and memory:
                                 memory.run_id = task_run_id
 
@@ -337,8 +311,6 @@ async def add_memories(
     infer: bool = True,
     instructions: str = "",
     expires_at: str = "",
-    memory_type: str = "",
-    agent_id: str = "",
     run_id: str = "",
 ) -> str:
     """
@@ -347,8 +319,6 @@ async def add_memories(
         infer: If True (default), LLM extracts key facts from text. If False, store text as-is.
         instructions: Per-call extraction instructions that override the global prompt for this request only.
         expires_at: ISO 8601 expiration datetime (e.g. "2026-04-01T00:00:00Z"). Memory auto-expires after this time.
-        memory_type: One of "fact", "preference", "session", "episodic". Helps with retrieval filtering.
-        agent_id: Identifier for the AI agent role (e.g. "cursor", "copilot", "chatgpt"). Enables per-agent memory scoping.
         run_id: Identifier for the conversation/session run. Enables session-level memory grouping.
     """
     uid = user_id_var.get(None)
@@ -387,8 +357,6 @@ async def add_memories(
         "infer": infer,
         "instructions": instructions or "",
         "expires_at": expires_at or "",
-        "memory_type": memory_type or "",
-        "agent_id": agent_id or "",
         "run_id": run_id or "",
     })
     pending = q.qsize()
@@ -403,16 +371,12 @@ async def search_memory(
     query: str,
     limit: int = 100,
     categories: str = "",
-    memory_type: str = "",
-    agent_id: str = "",
 ) -> str:
     """
     Args:
         query: The search query string.
         limit: Maximum number of results to return (default 100).
         categories: Comma-separated category names to filter by (e.g. "architecture,bugfix").
-        memory_type: Filter by memory type: "fact", "preference", "session", or "episodic".
-        agent_id: Filter by AI agent role (e.g. "cursor", "copilot"). Empty = all agents.
     """
     uid = user_id_var.get(None)
     client_name = client_name_var.get(None)
@@ -427,8 +391,6 @@ async def search_memory(
 
     effective_limit = min(max(limit, 1), 500)
     filter_categories = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
-    filter_memory_type = memory_type.strip() if memory_type else ""
-    filter_agent_id = agent_id.strip() if agent_id else ""
 
     try:
         db = SessionLocal()
@@ -563,8 +525,8 @@ async def search_memory(
             except Exception as ge:
                 logging.debug("Graph-enhanced search skipped: %s", ge)
 
-            # --- Post-filters: categories, memory_type, agent_id ---
-            if filter_categories or filter_memory_type or filter_agent_id:
+            # --- Post-filters: categories ---
+            if filter_categories:
                 filtered = []
                 for r in results:
                     try:
@@ -574,14 +536,9 @@ async def search_memory(
                     if not mem:
                         filtered.append(r)
                         continue
-                    if filter_memory_type and mem.memory_type != filter_memory_type:
+                    mem_cats = {c.name for c in mem.categories}
+                    if not mem_cats.intersection(filter_categories):
                         continue
-                    if filter_agent_id and mem.agent_id != filter_agent_id:
-                        continue
-                    if filter_categories:
-                        mem_cats = {c.name for c in mem.categories}
-                        if not mem_cats.intersection(filter_categories):
-                            continue
                     filtered.append(r)
                 results = filtered
 
@@ -1275,8 +1232,6 @@ async def export_memories(format: str = "json") -> str:
                 entry = {
                     "id": str(mem.id),
                     "content": mem.content,
-                    "memory_type": mem.memory_type,
-                    "agent_id": mem.agent_id,
                     "created_at": mem.created_at.isoformat() if mem.created_at else None,
                 }
                 if cats:

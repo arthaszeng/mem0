@@ -35,8 +35,6 @@ class TestCreateMemory:
         r = api_post(user_a_token, "/api/v1/memories/", json={
             "text": f"Typed memory e2e {_uid()}",
             "infer": False,
-            "memory_type": "fact",
-            "agent_id": "cursor",
             "run_id": "test-run-001",
             "project_slug": crud_project,
         })
@@ -132,10 +130,10 @@ class TestCategoriesAndDomains:
 
 
 class TestFilterMemories:
-    def test_filter_by_memory_type(self, user_a_token, crud_project):
+    def test_filter_by_categories(self, user_a_token, crud_project):
         r = api_get(user_a_token, "/api/v1/memories/", params={
             "project_slug": crud_project,
-            "memory_type": "fact",
+            "categories": "",
             "page": 1, "size": 10,
         })
         assert r.status_code == 200

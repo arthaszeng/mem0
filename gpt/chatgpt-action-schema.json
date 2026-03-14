@@ -71,15 +71,6 @@
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Filter by category names"
-                  },
-                  "memory_type": {
-                    "type": "string",
-                    "enum": ["fact", "preference", "session", "episodic"],
-                    "description": "Filter by memory type"
-                  },
-                  "agent_id": {
-                    "type": "string",
-                    "description": "Filter by agent ID (e.g. chatgpt, cursor)"
                   }
                 }
               }
@@ -128,15 +119,6 @@
                   "user_id": {
                     "type": "string",
                     "description": "User identifier — use the username returned by getMyProfile"
-                  },
-                  "memory_type": {
-                    "type": "string",
-                    "enum": ["fact", "preference", "session", "episodic"],
-                    "description": "Type of memory: fact, preference, session, or episodic"
-                  },
-                  "agent_id": {
-                    "type": "string",
-                    "description": "Agent identifier (defaults to chatgpt)"
                   },
                   "expires_at": {
                     "type": "string",
@@ -253,9 +235,7 @@
                 "type": "object",
                 "properties": {
                   "format": { "type": "string", "enum": ["json", "text"], "default": "json" },
-                  "categories": { "type": "array", "items": { "type": "string" } },
-                  "memory_type": { "type": "string", "enum": ["fact", "preference", "session", "episodic"] },
-                  "agent_id": { "type": "string" }
+                  "categories": { "type": "array", "items": { "type": "string" } }
                 }
               }
             }
@@ -526,9 +506,7 @@
           "memory": { "type": "string" },
           "score": { "type": "number" },
           "created_at": { "type": "string" },
-          "updated_at": { "type": "string", "nullable": true },
-          "memory_type": { "type": "string", "nullable": true, "description": "fact, preference, session, or episodic" },
-          "agent_id": { "type": "string", "nullable": true, "description": "Agent that created this memory" }
+          "updated_at": { "type": "string", "nullable": true }
         }
       }
     },

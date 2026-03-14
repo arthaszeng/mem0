@@ -1,6 +1,5 @@
 """Tests for v0.8 Memory Lifecycle features:
 - expires_at column and TTL cleanup
-- memory_type column
 - MemoryState.expired
 """
 import uuid
@@ -9,14 +8,7 @@ import datetime
 from tests.conftest import TEST_USER_ID, TEST_APP_ID
 
 
-class TestMemoryTypeEnum:
-    def test_memory_type_values(self):
-        from app.models import MemoryType
-        assert MemoryType.fact.value == "fact"
-        assert MemoryType.preference.value == "preference"
-        assert MemoryType.session.value == "session"
-        assert MemoryType.episodic.value == "episodic"
-
+class TestExpiredState:
     def test_expired_state_exists(self):
         from app.models import MemoryState
         assert MemoryState.expired.value == "expired"
@@ -33,13 +25,11 @@ class TestExpiresAtColumn:
             content="Session memory with TTL",
             state=MemoryState.active,
             expires_at=expires,
-            memory_type="session",
         )
         db_session.add(memory)
         db_session.commit()
         db_session.refresh(memory)
         assert memory.expires_at is not None
-        assert memory.memory_type == "session"
 
     def test_create_memory_without_expires(self, db_session):
         from app.models import Memory, MemoryState
@@ -54,7 +44,6 @@ class TestExpiresAtColumn:
         db_session.commit()
         db_session.refresh(memory)
         assert memory.expires_at is None
-        assert memory.memory_type is None
 
 
 class TestTTLCleanup:

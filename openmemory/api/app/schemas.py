@@ -51,8 +51,6 @@ class MemoryResponse(BaseModel):
     created_by: Optional[str] = None
     categories: List[str]
     metadata_: Optional[dict] = None
-    memory_type: Optional[str] = None
-    agent_id: Optional[str] = None
     run_id: Optional[str] = None
     expires_at: Optional[datetime] = None
 

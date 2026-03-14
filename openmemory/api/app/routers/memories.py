@@ -119,8 +119,6 @@ class SearchMemoryRequest(BaseModel):
     threshold: float = 0.0
     project_slug: Optional[str] = None
     categories: Optional[List[str]] = None
-    memory_type: Optional[str] = None
-    agent_id: Optional[str] = None
 
 
 @router.post("/search")
@@ -139,10 +137,6 @@ async def search_memories_semantic(
     qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=auth.username))]
     if pctx:
         qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=str(pctx.project_id))))
-    if request.memory_type:
-        qdrant_filters.append(FieldCondition(key="memory_type", match=MatchValue(value=request.memory_type)))
-    if request.agent_id:
-        qdrant_filters.append(FieldCondition(key="agent_id", match=MatchValue(value=request.agent_id)))
     query_filter = Filter(must=qdrant_filters)
 
     def _do_search():
@@ -237,8 +231,6 @@ async def list_memories(
         examples=[1718505600]
     ),
     categories: Optional[str] = None,
-    memory_type: Optional[str] = Query(None, description="Filter by memory type (fact, preference, session, episodic)"),
-    agent_id: Optional[str] = Query(None, description="Filter by agent ID"),
     params: Params = Depends(),
     search_query: Optional[str] = None,
     sort_column: Optional[str] = Query(None, description="Column to sort by (memory, categories, app_name, created_at)"),
@@ -272,10 +264,6 @@ async def list_memories(
     # Apply filters
     if app_id:
         query = query.filter(Memory.app_id == app_id)
-    if memory_type:
-        query = query.filter(Memory.memory_type == memory_type)
-    if agent_id:
-        query = query.filter(Memory.agent_id == agent_id)
 
     if from_date:
         from_datetime = datetime.fromtimestamp(from_date, tz=UTC)
@@ -321,8 +309,6 @@ async def list_memories(
                 created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
                 metadata_=memory.metadata_,
-                memory_type=memory.memory_type,
-                agent_id=memory.agent_id,
                 run_id=memory.run_id,
                 expires_at=memory.expires_at,
             )
@@ -484,8 +470,6 @@ class CreateMemoryRequest(BaseModel):
     infer: bool = True
     app: str = "openmemory"
     project_slug: Optional[str] = None
-    memory_type: Optional[str] = None
-    agent_id: Optional[str] = None
     run_id: Optional[str] = None
     expires_at: Optional[str] = None
 
@@ -667,10 +651,6 @@ async def create_memory(
     }
     if pctx:
         qdrant_meta["project_id"] = str(pctx.project_id)
-    if request.memory_type:
-        qdrant_meta["memory_type"] = request.memory_type
-    if request.agent_id:
-        qdrant_meta["agent_id"] = request.agent_id
     if request.run_id:
         qdrant_meta["run_id"] = request.run_id
     if request.expires_at:
@@ -713,10 +693,6 @@ async def create_memory(
                             metadata_=request.metadata,
                             state=MemoryState.active,
                         )
-                        if request.memory_type:
-                            new_mem_kwargs["memory_type"] = request.memory_type
-                        if request.agent_id:
-                            new_mem_kwargs["agent_id"] = request.agent_id
                         if request.run_id:
                             new_mem_kwargs["run_id"] = request.run_id
                         if request.expires_at:
@@ -940,15 +916,6 @@ async def get_memory_analytics(
     )
     category_distribution = [{"name": r.name, "count": r.count} for r in cat_rows]
 
-    agent_rows = (
-        db.query(func.coalesce(Memory.agent_id, "unspecified").label("agent_id"), func.count(Memory.id).label("count"))
-        .filter(*base_filters, Memory.state != MemoryState.archived)
-        .group_by(func.coalesce(Memory.agent_id, "unspecified"))
-        .order_by(func.count(Memory.id).desc())
-        .all()
-    )
-    agent_activity = [{"agent_id": r.agent_id, "count": r.count} for r in agent_rows]
-
     now = datetime.now(UTC)
     seven_d_ago = now - timedelta(days=7)
     thirty_d_ago = now - timedelta(days=30)
@@ -960,7 +927,6 @@ async def get_memory_analytics(
     return {
         "memory_growth": memory_growth,
         "category_distribution": category_distribution,
-        "agent_activity": agent_activity,
         "recent_activity": {
             "created_last_7d": created_last_7d,
             "created_last_30d": created_last_30d,
@@ -1260,8 +1226,6 @@ async def get_memory_access_log(
 class UpdateMemoryRequest(BaseModel):
     memory_content: str
     user_id: Optional[str] = None
-    memory_type: Optional[str] = None
-    agent_id: Optional[str] = None
     run_id: Optional[str] = None
     expires_at: Optional[str] = None
 
@@ -1280,10 +1244,6 @@ async def update_memory(
     if not request.memory_content or not request.memory_content.strip():
         raise HTTPException(400, "Memory content must not be empty or whitespace-only")
     memory.content = request.memory_content
-    if request.memory_type is not None:
-        memory.memory_type = request.memory_type
-    if request.agent_id is not None:
-        memory.agent_id = request.agent_id
     if request.run_id is not None:
         memory.run_id = request.run_id
     if request.expires_at is not None:
@@ -1311,8 +1271,6 @@ class FilterMemoriesRequest(BaseModel):
     to_date: Optional[int] = None
     show_archived: Optional[bool] = False
     project_slug: Optional[str] = None
-    memory_type: Optional[str] = None
-    agent_id: Optional[str] = None
 
 @router.post("/filter", response_model=Page[MemoryResponse])
 async def filter_memories(
@@ -1350,10 +1308,6 @@ async def filter_memories(
     # Apply app filter
     if request.app_ids:
         query = query.filter(Memory.app_id.in_(request.app_ids))
-    if request.memory_type:
-        query = query.filter(Memory.memory_type == request.memory_type)
-    if request.agent_id:
-        query = query.filter(Memory.agent_id == request.agent_id)
 
     # Apply domain filter
     if request.domains:
@@ -1423,8 +1377,6 @@ async def filter_memories(
                 created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
                 metadata_=memory.metadata_,
-                memory_type=memory.memory_type,
-                agent_id=memory.agent_id,
                 run_id=memory.run_id,
                 expires_at=memory.expires_at,
             )
@@ -1489,8 +1441,6 @@ async def get_related_memories(
                 created_by=memory.user.user_id if memory.user else None,
                 categories=[category.name for category in memory.categories],
                 metadata_=memory.metadata_,
-                memory_type=memory.memory_type,
-                agent_id=memory.agent_id,
                 run_id=memory.run_id,
                 expires_at=memory.expires_at,
             )
@@ -1529,8 +1479,6 @@ async def restore_memories(
 class ExportMemoriesRequest(BaseModel):
     format: str = "json"
     categories: Optional[List[str]] = None
-    memory_type: Optional[str] = None
-    agent_id: Optional[str] = None
     project_slug: Optional[str] = None
 
 
@@ -1549,10 +1497,6 @@ async def export_memories(
         filters.append(Memory.project_id == pctx.project_id)
     else:
         filters.append(Memory.user_id == user.id)
-    if request.memory_type:
-        filters.append(Memory.memory_type == request.memory_type)
-    if request.agent_id:
-        filters.append(Memory.agent_id == request.agent_id)
 
     query = db.query(Memory).filter(*filters).options(joinedload(Memory.categories))
 
@@ -1568,8 +1512,6 @@ async def export_memories(
             grouped.setdefault(cat, []).append({
                 "id": str(mem.id),
                 "content": mem.content,
-                "memory_type": mem.memory_type,
-                "agent_id": mem.agent_id,
                 "created_at": mem.created_at.isoformat() if mem.created_at else None,
             })
 
@@ -1724,48 +1666,3 @@ async def get_entities_graph(
 
     return data
 
-
-@router.get("/stats/types")
-async def get_memory_type_stats(
-    project_slug: Optional[str] = None,
-    auth: AuthenticatedUser = Depends(get_authenticated_user),
-    db: Session = Depends(get_db),
-):
-    """Get distribution of memory types for the dashboard."""
-    pctx = resolve_project(auth, db, project_slug)
-    user = auth.db_user
-
-    filters = [Memory.state == MemoryState.active]
-    if pctx:
-        filters.append(Memory.project_id == pctx.project_id)
-    else:
-        filters.append(Memory.user_id == user.id)
-
-    rows = (
-        db.query(Memory.memory_type, func.count(Memory.id))
-        .filter(*filters)
-        .group_by(Memory.memory_type)
-        .all()
-    )
-    distribution = {(r[0] or "untyped"): r[1] for r in rows}
-    return {"distribution": distribution, "total": sum(distribution.values())}
-
-
-@router.get("/stats/agents")
-async def get_agent_stats(
-    project_slug: Optional[str] = None,
-    auth: AuthenticatedUser = Depends(get_authenticated_user),
-    db: Session = Depends(get_db),
-):
-    """Get list of distinct agent_ids used in memories."""
-    pctx = resolve_project(auth, db, project_slug)
-    user = auth.db_user
-
-    filters = [Memory.state == MemoryState.active, Memory.agent_id.isnot(None)]
-    if pctx:
-        filters.append(Memory.project_id == pctx.project_id)
-    else:
-        filters.append(Memory.user_id == user.id)
-
-    rows = db.query(Memory.agent_id).filter(*filters).distinct().all()
-    return {"agents": [r[0] for r in rows]}

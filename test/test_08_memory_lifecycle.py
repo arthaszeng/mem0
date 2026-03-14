@@ -103,7 +103,7 @@ class TestEdgeCases:
             assert r.status_code == 200
 
 
-class TestMemoryType:
+class TestExpiresAt:
     def test_create_with_expires(self, user_a_token, lifecycle_project):
         r = api_post(user_a_token, "/api/v1/memories/", json={
             "text": f"Expiring memory lifecycle {_uid()}",

@@ -67,18 +67,10 @@ class TestSearchIsolation:
 
 
 class TestSearchFilters:
-    def test_search_with_memory_type(self, user_a_token, search_project):
+    def test_search_with_categories(self, user_a_token, search_project):
         r = api_post(user_a_token, "/api/v1/memories/search", json={
             "query": "anything",
             "project_slug": search_project,
-            "memory_type": "fact",
-        })
-        assert r.status_code == 200
-
-    def test_search_with_agent_id(self, user_a_token, search_project):
-        r = api_post(user_a_token, "/api/v1/memories/search", json={
-            "query": "anything",
-            "project_slug": search_project,
-            "agent_id": "cursor",
+            "categories": [],
         })
         assert r.status_code == 200

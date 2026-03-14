@@ -1,7 +1,7 @@
 """Tests for v0.9 Advanced Retrieval features:
-- MCP search_memory new parameters (limit, categories, memory_type)
+- MCP search_memory new parameters (limit, categories)
 - Keyword search (SQLite LIKE)
-- Category/memory_type filtering
+- Category filtering
 """
 import uuid
 import datetime
@@ -70,30 +70,6 @@ class TestKeywordSearch:
             .all()
         )
         assert len(found) == 0
-
-
-class TestMemoryTypeFilter:
-    def test_filter_by_memory_type(self, db_session):
-        from app.models import Memory, MemoryState
-        fact_id = uuid.uuid4()
-        session_id = uuid.uuid4()
-        db_session.add(Memory(
-            id=fact_id, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
-            content="A fact", state=MemoryState.active, memory_type="fact",
-        ))
-        db_session.add(Memory(
-            id=session_id, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
-            content="A session note", state=MemoryState.active, memory_type="session",
-        ))
-        db_session.commit()
-
-        facts = (
-            db_session.query(Memory)
-            .filter(Memory.user_id == TEST_USER_ID, Memory.memory_type == "fact")
-            .all()
-        )
-        assert any(str(m.id) == str(fact_id) for m in facts)
-        assert not any(str(m.id) == str(session_id) for m in facts)
 
 
 class TestRegressions:

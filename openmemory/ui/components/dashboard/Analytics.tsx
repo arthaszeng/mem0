@@ -27,11 +27,6 @@ interface CategoryItem {
   count: number;
 }
 
-interface AgentItem {
-  agent_id: string;
-  count: number;
-}
-
 interface RecentActivity {
   created_last_7d: number;
   created_last_30d: number;
@@ -42,7 +37,6 @@ interface RecentActivity {
 interface AnalyticsData {
   memory_growth: MemoryGrowthPoint[];
   category_distribution: CategoryItem[];
-  agent_activity: AgentItem[];
   recent_activity: RecentActivity;
 }
 
