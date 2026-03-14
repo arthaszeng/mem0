@@ -189,3 +189,7 @@ testing.ipynb
 *.tar
 *.tar.gz
 openmemory/ui/tsconfig.tsbuildinfo
+
+# Environment files with secrets
+.env.local
+.env.cloud

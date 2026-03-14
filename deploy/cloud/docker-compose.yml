@@ -1,0 +1,106 @@
+services:
+  # ===== Reverse Proxy (host network for port 80/443 binding) =====
+  nginx:
+    image: nginx:alpine
+    network_mode: host
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/cert:/etc/nginx/cert:ro
+    depends_on:
+      - auth-service
+      - openmemory-mcp
+      - openmemory-ui
+      - concierge-mcp
+    restart: unless-stopped
+
+  # ===== Vector Store =====
+  mem0-store:
+    image: qdrant/qdrant
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - mem0_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # ===== Auth Service =====
+  auth-service:
+    image: mem0/auth-service:${APP_VERSION:-latest}
+    env_file: .env
+    ports:
+      - "127.0.0.1:8760:8760"
+    volumes:
+      - auth_data:/data
+    restart: unless-stopped
+
+  # ===== OpenMemory API + MCP =====
+  openmemory-mcp:
+    image: mem0/openmemory-mcp:${APP_VERSION:-latest}
+    env_file: .env
+    depends_on:
+      - mem0-store
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - openmemory_data:/data
+    restart: unless-stopped
+
+  # ===== OpenMemory UI =====
+  openmemory-ui:
+    image: mem0/openmemory-ui:${APP_VERSION:-latest}
+    env_file: .env
+    depends_on:
+      - openmemory-mcp
+    ports:
+      - "127.0.0.1:3001:3000"
+    restart: unless-stopped
+
+  # ===== Concierge MCP =====
+  concierge-mcp:
+    image: mem0/concierge-mcp:${APP_VERSION:-latest}
+    env_file: .env
+    ports:
+      - "127.0.0.1:8767:8767"
+    restart: unless-stopped
+
+  # ===== Lobe Chat =====
+  lobe-chat:
+    image: lobehub/lobe-chat:latest
+    ports:
+      - "127.0.0.1:3210:3210"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_PROXY_URL=${OPENAI_BASE_URL:-https://millionengine.com/v1}
+      - ACCESS_CODE=${LOBE_ACCESS_CODE:-arthas2026}
+      - NEXT_PUBLIC_BASE_PATH=/chat
+      - PORT=3210
+    depends_on:
+      - openmemory-mcp
+    restart: unless-stopped
+
+  # ===== LangGraph Agent =====
+  langgraph-agent:
+    image: mem0/langgraph-agent:${APP_VERSION:-latest}
+    ports:
+      - "127.0.0.1:8766:8766"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://millionengine.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-qwen-plus}
+    depends_on:
+      - openmemory-mcp
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  auth_data:
+    external: true
+    name: mem0_auth_data
+  mem0_storage:
+    external: true
+    name: openmemory_mem0_storage
+  openmemory_data:
+    external: true
+    name: openmemory_openmemory_data
