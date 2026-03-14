@@ -3,7 +3,7 @@
     "info": {
       "title": "OpenMemory",
       "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
-      "version": "1.5.0"
+      "version": "1.6.0"
     },
     "servers": [
       {
@@ -302,9 +302,78 @@
         }
       }
     },
-    "components": {
-      "schemas": {
-        "MemoryResult": {
+    "/memory-api/api/v1/memories/stats/insights": {
+      "get": {
+        "operationId": "getMemoryInsights",
+        "summary": "Get intelligent insights about stored memories",
+        "description": "Returns LLM-generated user profile summary, trending topics analysis, and knowledge category coverage.",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false },
+            "description": "Force regenerate user profile from LLM"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory insights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user_profile": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "summary": { "type": "string" },
+                        "generated_at": { "type": "string" }
+                      }
+                    },
+                    "topic_trends": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "topic": { "type": "string" },
+                          "trend": { "type": "string", "enum": ["rising", "stable", "declining"] },
+                          "recent_count": { "type": "integer" },
+                          "previous_count": { "type": "integer" }
+                        }
+                      }
+                    },
+                    "knowledge_coverage": {
+                      "type": "object",
+                      "properties": {
+                        "total_categories": { "type": "integer" },
+                        "total_domains": { "type": "integer" },
+                        "top_categories": { "type": "array", "items": { "$ref": "#/components/schemas/CategoryCoverage" } },
+                        "sparse_categories": { "type": "array", "items": { "$ref": "#/components/schemas/CategoryCoverage" } },
+                        "domain_coverage": { "type": "array", "items": { "$ref": "#/components/schemas/CategoryCoverage" } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CategoryCoverage": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "count": { "type": "integer" },
+          "pct": { "type": "number" }
+        }
+      },
+      "MemoryResult": {
           "type": "object",
           "properties": {
             "id": { "type": "string" },

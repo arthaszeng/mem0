@@ -143,7 +143,7 @@ MCP 工具集追平 REST API — 更新、归档、结构化导出
 
 - [x] **Memory Consolidation** — MCP consolidate_memories 工具，SequenceMatcher 发现相似记忆 + LLM 合并，支持 dry_run
 - [x] **Contradiction Detection** — MCP check_contradiction 工具，LLM 对比新记忆与已有记忆检测冲突
-- [ ] **Memory Insights** — 用户画像摘要 + 主题趋势分析 + 知识覆盖度（延至 v2.x）
+- [x] **Memory Insights** — 用户画像摘要 + 主题趋势分析 + 知识覆盖度（v1.6 实现）
 
 ## v1.4 | Admin UI | completed | 2026-03 | layout-dashboard
 
@@ -163,3 +163,14 @@ MCP 工具集追平 REST API — 更新、归档、结构化导出
 - [x] **Category Distribution** — recharts 横向 BarChart 展示 Top 10 分类占比
 - [x] **Quick Stats** — 7 天 / 30 天新增、已归档数、活跃总数四维统计卡片
 - [x] **Dashboard 集成** — Analytics 面板集成到 Dashboard，动态加载无 SSR
+
+## v1.6 | Memory Insights | completed | 2026-03 | brain
+
+LLM 驱动的智能洞察 — 用户画像 + 主题趋势 + 知识覆盖度
+
+- [x] **User Profile 生成** — LLM 分析最近 100 条记忆生成 3–5 句用户画像，1 小时缓存 + 手动刷新
+- [x] **Topic Trends 分析** — 比较近 7 天 vs 前 23 天主题频次，自动标注 rising / stable / declining 趋势
+- [x] **Knowledge Coverage** — 统计类别和域的覆盖度，Top 10 + Sparse 稀疏类别识别
+- [x] **Insights REST API** — /api/v1/memories/stats/insights 端点，支持 refresh 参数强制重新生成画像
+- [x] **MCP get_insights 工具** — AI 客户端可直接查询记忆洞察，含画像 + 趋势 + 覆盖度
+- [x] **Dashboard Insights 面板** — 三栏布局：Memory Profile 卡 + Trending Topics 标签云 + Knowledge Coverage 进度条

@@ -30,9 +30,16 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 from app.utils.categorization import match_domain_by_keywords
+from app.utils.insights import (
+    compute_knowledge_coverage,
+    compute_topic_trends,
+    generate_user_profile,
+)
 from app.utils.sensitive import sanitize_text
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memories"])
+
+_profile_cache: dict[str, tuple[dict, datetime]] = {}
 
 
 def get_memory_or_404(db: Session, memory_id: UUID) -> Memory:
@@ -963,6 +970,82 @@ async def get_memory_analytics(
             "archived_count": archived_count,
             "total_active": total_active,
         },
+    }
+
+
+@router.get("/stats/insights")
+async def get_memory_insights(
+    project_slug: Optional[str] = Query(None),
+    refresh: bool = Query(False, description="Regenerate user profile from LLM"),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    pctx = resolve_project(auth_user, db, project_slug)
+    user = auth_user.db_user
+
+    base_filters = [
+        Memory.state != MemoryState.deleted,
+        Memory.state != MemoryState.archived,
+    ]
+    if pctx:
+        base_filters.append(Memory.project_id == pctx.project_id)
+    else:
+        base_filters.append(Memory.user_id == user.id)
+
+    memories_q = (
+        db.query(Memory)
+        .filter(*base_filters)
+        .options(joinedload(Memory.categories))
+        .order_by(Memory.created_at.desc())
+    )
+    memories = memories_q.all()
+
+    memory_dicts = []
+    cat_counts: dict[str, int] = {}
+    domain_counts: dict[str, int] = {}
+    for m in memories:
+        cats = [c.name for c in m.categories]
+        domain = (m.metadata_ or {}).get("domain", "")
+        for c in cats:
+            cat_counts[c] = cat_counts.get(c, 0) + 1
+        if domain:
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        memory_dicts.append({
+            "content": m.content,
+            "categories": cats,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "metadata": m.metadata_ or {},
+            "metadata_": m.metadata_ or {},
+        })
+
+    topic_trends = compute_topic_trends(memory_dicts, days=30)
+    categories_list = [{"name": k, "count": v} for k, v in cat_counts.items()]
+    domains_list = [{"name": k, "count": v} for k, v in domain_counts.items()]
+    knowledge_coverage = compute_knowledge_coverage(
+        categories_list, domains_list, total_memories=len(memories)
+    )
+
+    cache_key = f"{user.id}:{pctx.project_id if pctx else ''}"
+    user_profile = None
+    now = datetime.now(UTC)
+    cache_ttl = timedelta(hours=1)
+    if cache_key in _profile_cache:
+        cached_profile, cached_at = _profile_cache[cache_key]
+        if not refresh and (now - cached_at) < cache_ttl:
+            user_profile = cached_profile
+
+    if user_profile is None and memory_dicts:
+        try:
+            user_profile = await generate_user_profile(memory_dicts)
+            if user_profile:
+                _profile_cache[cache_key] = (user_profile, now)
+        except Exception as e:
+            logging.warning("Insights user profile generation failed: %s", e)
+
+    return {
+        "user_profile": user_profile,
+        "topic_trends": topic_trends,
+        "knowledge_coverage": knowledge_coverage,
     }
 
 

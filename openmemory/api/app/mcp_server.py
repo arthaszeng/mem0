@@ -36,6 +36,7 @@ from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
 from qdrant_client.models import Filter, FieldCondition, MatchValue
+from sqlalchemy.orm import joinedload
 
 # Load environment variables
 load_dotenv()
@@ -287,6 +288,8 @@ def get_memory_client_safe():
     except Exception as e:
         logging.warning(f"Failed to get memory client: {e}")
         return None
+
+_insights_profile_cache: dict[str, tuple[dict, "datetime.datetime"]] = {}
 
 # Context variables for user_id, client_name, and project_slug
 user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("user_id")
@@ -1336,6 +1339,101 @@ async def list_graph_entities(limit: int = 100) -> str:
     except Exception as e:
         logging.exception(e)
         return f"Error listing entities: {e}"
+
+
+@mcp.tool(description="Get intelligent insights about stored memories — user profile summary, trending topics, and knowledge coverage. Use when the user asks about their memory patterns or wants an overview.")
+async def get_insights(refresh: bool = False) -> str:
+    """
+    Args:
+        refresh: If True, regenerate the user profile from LLM. Default False uses cached profile.
+    """
+    uid = user_id_var.get(None)
+    client_name = client_name_var.get(None)
+    if not uid:
+        return "Error: user_id not provided"
+    if not client_name:
+        return "Error: client_name not provided"
+
+    try:
+        db = SessionLocal()
+        try:
+            user, _ = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
+
+            base_filters = [
+                Memory.state != MemoryState.deleted,
+                Memory.state != MemoryState.archived,
+            ]
+            if project_id:
+                base_filters.append(Memory.project_id == uuid.UUID(project_id))
+            else:
+                base_filters.append(Memory.user_id == user.id)
+
+            memories = (
+                db.query(Memory)
+                .filter(*base_filters)
+                .options(joinedload(Memory.categories))
+                .order_by(Memory.created_at.desc())
+                .all()
+            )
+
+            memory_dicts = []
+            cat_counts = {}
+            domain_counts = {}
+            for m in memories:
+                cats = [c.name for c in m.categories]
+                domain = (m.metadata_ or {}).get("domain", "")
+                for c in cats:
+                    cat_counts[c] = cat_counts.get(c, 0) + 1
+                if domain:
+                    domain_counts[domain] = domain_counts.get(domain, 0) + 1
+                memory_dicts.append({
+                    "content": m.content,
+                    "categories": cats,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                    "metadata": m.metadata_ or {},
+                    "metadata_": m.metadata_ or {},
+                })
+
+            from app.utils.insights import (
+                compute_knowledge_coverage,
+                compute_topic_trends,
+                generate_user_profile,
+            )
+
+            topic_trends = compute_topic_trends(memory_dicts, days=30)
+            categories_list = [{"name": k, "count": v} for k, v in cat_counts.items()]
+            domains_list = [{"name": k, "count": v} for k, v in domain_counts.items()]
+            knowledge_coverage = compute_knowledge_coverage(
+                categories_list, domains_list, total_memories=len(memories)
+            )
+
+            cache_key = f"{uid}:{project_id or ''}"
+            user_profile = None
+            cache_ttl = datetime.timedelta(hours=1)
+            now = datetime.datetime.now(datetime.UTC)
+            if not refresh and cache_key in _insights_profile_cache:
+                cached_profile, cached_at = _insights_profile_cache[cache_key]
+                if (now - cached_at) < cache_ttl:
+                    user_profile = cached_profile
+            if user_profile is None and memory_dicts:
+                try:
+                    user_profile = await generate_user_profile(memory_dicts)
+                    if user_profile:
+                        _insights_profile_cache[cache_key] = (user_profile, now)
+                except Exception as e:
+                    logging.warning("get_insights profile generation failed: %s", e)
+
+            return json.dumps({
+                "user_profile": user_profile,
+                "topic_trends": topic_trends,
+                "knowledge_coverage": knowledge_coverage,
+            }, indent=2)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.exception(e)
+        return f"Error getting insights: {e}"
 
 
 def _read_gateway_user(request: Request) -> str:
