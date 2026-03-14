@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import List, Optional, Set
 from uuid import UUID
 
@@ -887,6 +887,83 @@ async def delete_agent_instructions(
     db.delete(row)
     db.commit()
     return {"status": "deleted"}
+
+
+@router.get("/stats/analytics")
+async def get_memory_analytics(
+    project_slug: Optional[str] = Query(None),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    pctx = resolve_project(auth_user, db, project_slug)
+    user = auth_user.db_user
+
+    base_filters = [Memory.state != MemoryState.deleted]
+    if pctx:
+        base_filters.append(Memory.project_id == pctx.project_id)
+    else:
+        base_filters.append(Memory.user_id == user.id)
+
+    end_date = datetime.now(UTC).date()
+    start_date = end_date - timedelta(days=30)
+
+    growth_rows = (
+        db.query(func.date(Memory.created_at).label("date"), func.count(Memory.id).label("count"))
+        .filter(*base_filters, Memory.created_at >= datetime.combine(start_date, datetime.min.time()).replace(tzinfo=UTC))
+        .group_by(func.date(Memory.created_at))
+        .order_by(func.date(Memory.created_at))
+        .all()
+    )
+    growth_by_date = {str(r.date): r.count for r in growth_rows}
+    cumulative = 0
+    memory_growth = []
+    for i in range(31):
+        d = start_date + timedelta(days=i)
+        if d > end_date:
+            break
+        date_str = d.isoformat()
+        count = growth_by_date.get(date_str, 0)
+        cumulative += count
+        memory_growth.append({"date": date_str, "count": count, "cumulative": cumulative})
+
+    cat_rows = (
+        db.query(Category.name, func.count(Memory.id).label("count"))
+        .join(Category.memories)
+        .filter(*base_filters, Memory.state != MemoryState.archived)
+        .group_by(Category.name)
+        .order_by(func.count(Memory.id).desc())
+        .all()
+    )
+    category_distribution = [{"name": r.name, "count": r.count} for r in cat_rows]
+
+    agent_rows = (
+        db.query(func.coalesce(Memory.agent_id, "unspecified").label("agent_id"), func.count(Memory.id).label("count"))
+        .filter(*base_filters, Memory.state != MemoryState.archived)
+        .group_by(func.coalesce(Memory.agent_id, "unspecified"))
+        .order_by(func.count(Memory.id).desc())
+        .all()
+    )
+    agent_activity = [{"agent_id": r.agent_id, "count": r.count} for r in agent_rows]
+
+    now = datetime.now(UTC)
+    seven_d_ago = now - timedelta(days=7)
+    thirty_d_ago = now - timedelta(days=30)
+    created_last_7d = db.query(func.count(Memory.id)).filter(*base_filters, Memory.created_at >= seven_d_ago).scalar() or 0
+    created_last_30d = db.query(func.count(Memory.id)).filter(*base_filters, Memory.created_at >= thirty_d_ago).scalar() or 0
+    archived_count = db.query(func.count(Memory.id)).filter(*base_filters, Memory.state == MemoryState.archived).scalar() or 0
+    total_active = db.query(func.count(Memory.id)).filter(*base_filters, Memory.state == MemoryState.active).scalar() or 0
+
+    return {
+        "memory_growth": memory_growth,
+        "category_distribution": category_distribution,
+        "agent_activity": agent_activity,
+        "recent_activity": {
+            "created_last_7d": created_last_7d,
+            "created_last_30d": created_last_30d,
+            "archived_count": archived_count,
+            "total_active": total_active,
+        },
+    }
 
 
 # Get memory by ID

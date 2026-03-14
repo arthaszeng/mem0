@@ -144,3 +144,22 @@ MCP 工具集追平 REST API — 更新、归档、结构化导出
 - [x] **Memory Consolidation** — MCP consolidate_memories 工具，SequenceMatcher 发现相似记忆 + LLM 合并，支持 dry_run
 - [x] **Contradiction Detection** — MCP check_contradiction 工具，LLM 对比新记忆与已有记忆检测冲突
 - [ ] **Memory Insights** — 用户画像摘要 + 主题趋势分析 + 知识覆盖度（延至 v2.x）
+
+## v1.4 | Admin UI | completed | 2026-03 | layout-dashboard
+
+后端管理能力全面暴露到 UI — 策略配置 + Agent 管理 + 批量操作
+
+- [x] **Archive Policies 面板** — Settings 页新增 Policies Tab，CRUD 归档策略 + 手动触发
+- [x] **Agent Instructions 面板** — Settings 页新增 Agents Tab，按 agent 编辑 Custom Instructions
+- [x] **批量操作栏** — Memories 表格选中后浮现操作栏，支持批量 Archive / Pause / Delete
+- [x] **Settings 6-Tab 布局** — Users / Projects / API Keys / Policies / Agents / System 六栏管理
+
+## v1.5 | Memory Analytics | completed | 2026-03 | bar-chart-3
+
+从数据到洞察 — 记忆增长趋势 + 分类分布 + 活跃度分析
+
+- [x] **Analytics API** — /api/v1/memories/stats/analytics 端点，30 天增长 + 分类分布 + Agent 活跃度
+- [x] **Memory Growth Chart** — recharts AreaChart 展示 30 天每日新增记忆趋势
+- [x] **Category Distribution** — recharts 横向 BarChart 展示 Top 10 分类占比
+- [x] **Quick Stats** — 7 天 / 30 天新增、已归档数、活跃总数四维统计卡片
+- [x] **Dashboard 集成** — Analytics 面板集成到 Dashboard，动态加载无 SSR

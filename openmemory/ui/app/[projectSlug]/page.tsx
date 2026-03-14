@@ -10,6 +10,11 @@ const GraphView = dynamic(() => import("@/components/dashboard/GraphView").then(
   ssr: false,
 });
 
+const Analytics = dynamic(
+  () => import("@/components/dashboard/Analytics").then((m) => ({ default: m.Analytics })),
+  { ssr: false }
+);
+
 export default function ProjectDashboardPage() {
   return (
     <div className="text-white py-6">
@@ -24,9 +29,12 @@ export default function ProjectDashboardPage() {
             </div>
           </div>
           <div className="animate-fade-slide-down delay-1">
-            <GraphView />
+            <Analytics />
           </div>
           <div className="animate-fade-slide-down delay-2">
+            <GraphView />
+          </div>
+          <div className="animate-fade-slide-down delay-3">
             <ReleaseTree />
           </div>
         </div>
