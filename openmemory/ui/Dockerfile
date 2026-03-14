@@ -29,6 +29,9 @@ RUN cp .env.example .env
 ARG NEXT_PUBLIC_BASE_PATH="/memory"
 ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
 
+ARG APP_VERSION=dev
+ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
+
 ARG NODE_BUILD_MEM=1024
 ENV NODE_OPTIONS="--max-old-space-size=${NODE_BUILD_MEM}"
 RUN --mount=type=cache,target=/app/.next/cache \
@@ -37,7 +40,12 @@ RUN --mount=type=cache,target=/app/.next/cache \
 FROM base AS runner
 WORKDIR /app
 
+ARG APP_VERSION=dev
+LABEL org.opencontainers.image.name="mem0/openmemory-ui"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs

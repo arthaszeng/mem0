@@ -80,7 +80,8 @@ async def concierge_search(query: str) -> str:
 
 # ---------- FastAPI app ----------
 
-app = FastAPI(title="Concierge MCP Server")
+_app_version = os.getenv("APP_VERSION", "dev")
+app = FastAPI(title="Concierge MCP Server", version=_app_version)
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,6 +92,11 @@ app.add_middleware(
 
 # Mount OAuth endpoints under prefix
 app.include_router(oauth_router, prefix=_PREFIX)
+
+
+@app.get(f"{_PREFIX}/health")
+async def health():
+    return {"status": "ok", "service": "concierge-mcp", "version": _app_version}
 
 
 @app.get(f"{_PREFIX}/auth/extension-id")

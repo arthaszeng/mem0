@@ -7,8 +7,11 @@ services:
       - mem0_storage:/mem0/storage
 
   openmemory-mcp:
-    image: mem0/openmemory-mcp
-    build: api/
+    build:
+      context: api/
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    image: mem0/openmemory-mcp:${APP_VERSION:-dev}
     environment:
       - MEM0_USER=${MEM0_USER}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-dummy-key}
@@ -17,6 +20,7 @@ services:
       - CATEGORIZATION_PROVIDER=${CATEGORIZATION_PROVIDER:-ollama}
       - CATEGORIZATION_MODEL=${CATEGORIZATION_MODEL:-}
       - FORCE_OPENAI=${FORCE_OPENAI:-}
+      - APP_VERSION=${APP_VERSION:-dev}
     depends_on:
       - mem0_store
     ports:
@@ -30,7 +34,9 @@ services:
     build:
       context: ui/
       dockerfile: Dockerfile
-    image: mem0/openmemory-ui:latest
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    image: mem0/openmemory-ui:${APP_VERSION:-dev}
     ports:
       - "3001:3000"
     environment:

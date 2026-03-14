@@ -14,9 +14,12 @@ services:
 
   # ===== Auth Service (OAuth 2.1 Authorization Server) =====
   auth-service:
-    build: openmemory/auth/
+    build:
+      context: openmemory/auth/
+      args:
+        APP_VERSION: ${APP_VERSION}
+    image: mem0/auth-service:${APP_VERSION}
     env_file: .env.local
-    # ports intentionally not exposed — access via nginx gateway only
     volumes:
       - ./openmemory/auth:/app
       - auth_data:/data
@@ -27,18 +30,20 @@ services:
   # ===== Vector Store =====
   mem0-store:
     image: qdrant/qdrant
-    # ports intentionally not exposed — internal service only
     volumes:
       - mem0_storage:/qdrant/storage
     restart: unless-stopped
 
   # ===== OpenMemory API + MCP =====
   openmemory-mcp:
-    build: openmemory/api/
+    build:
+      context: openmemory/api/
+      args:
+        APP_VERSION: ${APP_VERSION}
+    image: mem0/openmemory-mcp:${APP_VERSION}
     env_file: .env.local
     depends_on:
       - mem0-store
-    # ports intentionally not exposed — access via nginx gateway only
     volumes:
       - ./openmemory/api:/usr/src/openmemory
       - openmemory_data:/data
@@ -51,6 +56,9 @@ services:
     build:
       context: openmemory/ui/
       dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION}
+    image: mem0/openmemory-ui:${APP_VERSION}
     env_file: .env.local
     depends_on:
       - openmemory-mcp
@@ -58,7 +66,11 @@ services:
 
   # ===== Concierge MCP =====
   concierge-mcp:
-    build: concierge/
+    build:
+      context: concierge/
+      args:
+        APP_VERSION: ${APP_VERSION}
+    image: mem0/concierge-mcp:${APP_VERSION}
     env_file: .env.local
     restart: unless-stopped
 

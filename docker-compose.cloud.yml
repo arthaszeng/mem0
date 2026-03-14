@@ -10,7 +10,7 @@ services:
 
   # ===== Auth Service =====
   auth-service:
-    image: mem0/auth-service:latest
+    image: mem0/auth-service:${APP_VERSION}
     env_file: .env.cloud
     ports:
       - "127.0.0.1:8760:8760"
@@ -20,7 +20,7 @@ services:
 
   # ===== OpenMemory API + MCP =====
   openmemory-mcp:
-    image: mem0/openmemory-mcp:latest
+    image: mem0/openmemory-mcp:${APP_VERSION}
     env_file: .env.cloud
     depends_on:
       - mem0-store
@@ -32,7 +32,7 @@ services:
 
   # ===== OpenMemory UI =====
   openmemory-ui:
-    image: mem0/openmemory-ui:latest
+    image: mem0/openmemory-ui:${APP_VERSION}
     env_file: .env.cloud
     depends_on:
       - openmemory-mcp
@@ -42,7 +42,7 @@ services:
 
   # ===== Concierge MCP =====
   concierge-mcp:
-    image: mem0/concierge-mcp:latest
+    image: mem0/concierge-mcp:${APP_VERSION}
     env_file: .env.cloud
     ports:
       - "127.0.0.1:8767:8767"
@@ -65,7 +65,7 @@ services:
 
   # ===== LangGraph Agent =====
   langgraph-agent:
-    image: mem0/langgraph-agent:latest
+    image: mem0/langgraph-agent:${APP_VERSION}
     ports:
       - "127.0.0.1:8766:8766"
     environment:

@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
 
   openmemory-mcp:
-    image: mem0/openmemory-mcp
+    image: mem0/openmemory-mcp:${APP_VERSION:-latest}
     environment:
       - MEM0_USER=${MEM0_USER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -17,6 +17,7 @@ services:
       - CATEGORIZATION_PROVIDER=${CATEGORIZATION_PROVIDER:-openai}
       - CATEGORIZATION_MODEL=${CATEGORIZATION_MODEL:-}
       - FORCE_OPENAI=${FORCE_OPENAI:-}
+      - APP_VERSION=${APP_VERSION:-latest}
     depends_on:
       - mem0_store
     ports:
@@ -26,7 +27,7 @@ services:
     restart: unless-stopped
 
   openmemory-ui:
-    image: mem0/openmemory-ui:latest
+    image: mem0/openmemory-ui:${APP_VERSION:-latest}
     ports:
       - "127.0.0.1:3001:3000"
     environment:
@@ -53,7 +54,7 @@ services:
     restart: unless-stopped
 
   langgraph-agent:
-    image: mem0/langgraph-agent:latest
+    image: mem0/langgraph-agent:${APP_VERSION:-latest}
     ports:
       - "127.0.0.1:8766:8766"
     environment:

@@ -101,4 +101,4 @@ app.include_router(api_keys_router)
 
 @app.get("/auth/health")
 def health():
-    return {"status": "ok", "service": "auth-service"}
+    return {"status": "ok", "service": "auth-service", "version": _os.environ.get("APP_VERSION", "dev")}

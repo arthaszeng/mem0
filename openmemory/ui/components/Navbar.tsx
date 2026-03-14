@@ -33,6 +33,7 @@ import {
 import { Label } from "@/components/ui/label";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
 
 const GLOBAL_ROUTES = ["/login", "/change-password", "/settings", "/invite"];
 const LAST_PROJECT_KEY = "om_last_project";
@@ -417,6 +418,7 @@ export function Navbar() {
           <Link href="/" className="flex items-center gap-2">
             <Image src={`${basePath}/logo.svg`} alt="OpenMemory" width={26} height={26} />
             <span className="text-xl font-medium hidden sm:inline">OpenMemory</span>
+            <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">v{appVersion}</span>
           </Link>
 
           {!isLoginPage && projectSlug && projects.length > 0 && (
