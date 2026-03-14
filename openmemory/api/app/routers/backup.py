@@ -579,6 +579,85 @@ async def export_backup(
 # 2. Import (async: SQLite sync + background batch embed)
 # ---------------------------------------------------------------------------
 
+
+def _normalize_memory_record(m: dict) -> dict:
+    """Ensure a memory dict has all expected fields with sensible defaults.
+
+    Handles older exports that may use ``memory`` or ``text`` instead of
+    ``content``, or lack fields added in v2 (project_slug, creator_username,
+    memory_type, agent_id, run_id, etc.).
+    """
+    content = (
+        m.get("content")
+        or m.get("memory")
+        or m.get("text")
+        or m.get("data")
+        or ""
+    )
+
+    if "id" not in m:
+        m["id"] = str(uuid4())
+
+    m.setdefault("content", content)
+    m.setdefault("app_name", m.get("app") or "openmemory")
+    m.setdefault("state", "active")
+
+    raw_meta = m.get("metadata") or m.get("metadata_") or {}
+    if isinstance(raw_meta, str):
+        try:
+            raw_meta = json.loads(raw_meta)
+        except Exception:
+            raw_meta = {}
+    m["metadata"] = raw_meta if isinstance(raw_meta, dict) else {}
+
+    m.setdefault("created_at", None)
+    m.setdefault("updated_at", None)
+    m.setdefault("archived_at", None)
+    m.setdefault("deleted_at", None)
+    m.setdefault("project_id", None)
+    m.setdefault("project_slug", None)
+    m.setdefault("creator_username", None)
+    m.setdefault("category_ids", [])
+    m.setdefault("memory_type", None)
+    m.setdefault("agent_id", None)
+    m.setdefault("run_id", None)
+    m.setdefault("expires_at", None)
+    return m
+
+
+def _normalize_export_data(data: Any) -> dict:
+    """Accept various legacy export shapes and return the canonical v2 dict.
+
+    Supports:
+    - Full v2 dict (pass-through)
+    - Dict missing some top-level sections (fill with empty defaults)
+    - Flat list of memory dicts (wrap in canonical structure)
+    - Dict with ``results`` key (mem0 SDK search export)
+    """
+    if isinstance(data, list):
+        data = {"memories": data}
+
+    if not isinstance(data, dict):
+        return {"memories": [], "export_meta": {"version": "0"}}
+
+    if "results" in data and "memories" not in data:
+        data["memories"] = data.pop("results")
+
+    data.setdefault("user", {})
+    data.setdefault("projects", [])
+    data.setdefault("apps", [])
+    data.setdefault("categories", [])
+    data.setdefault("memories", [])
+    data.setdefault("memory_categories", [])
+    data.setdefault("status_history", [])
+    data.setdefault("access_controls", [])
+    data.setdefault("export_meta", {"version": "1"})
+
+    data["memories"] = [_normalize_memory_record(m) for m in data["memories"]]
+
+    return data
+
+
 @router.post("/import")
 async def import_backup(
     file: UploadFile = File(..., description="Zip with memories.json and memories.jsonl.gz"),
@@ -618,6 +697,9 @@ async def import_backup(
         raise
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid zip file")
+
+    # --- Normalize legacy/cloud export formats ---
+    sqlite_data = _normalize_export_data(sqlite_data)
 
     export_version = sqlite_data.get("export_meta", {}).get("version", "1")
 
@@ -673,60 +755,100 @@ async def import_backup(
     imported_count = 0
     skipped_count = 0
 
+    error_count = 0
     for m in sqlite_data.get("memories", []):
-        incoming_id = UUID(m["id"])
-        existing = db.query(Memory).filter(Memory.id == incoming_id).first()
-
-        if is_cross_user or (existing and existing.user_id != user.id):
-            target_id = uuid4()
-        else:
-            target_id = incoming_id
-        old_to_new_id[m["id"]] = target_id
-
-        app_name = m.get("app_name") or None
-        app_obj = _resolve_app(app_name)
-        app_for_memory[m["id"]] = app_obj.name
-
-        mem_project = target_project
-        if export_version >= "2" and not project_slug and m.get("project_slug"):
-            pctx = resolve_project(auth, db, m["project_slug"], min_role=ProjectRole.read_write)
-            if pctx:
-                mem_project = pctx.project
-
-        if existing and (existing.user_id == user.id) and mode == "skip":
-            skipped_count += 1
-            continue
-
-        if existing and (existing.user_id == user.id) and mode == "overwrite":
-            existing.app_id = app_obj.id
-            existing.project_id = mem_project.id
-            existing.content = m.get("content") or ""
-            existing.metadata_ = m.get("metadata") or {}
+        try:
             try:
-                existing.state = MemoryState(m.get("state", "active"))
+                incoming_id = UUID(m["id"])
+            except (ValueError, KeyError):
+                incoming_id = uuid4()
+            existing = db.query(Memory).filter(Memory.id == incoming_id).first()
+
+            if is_cross_user or (existing and existing.user_id != user.id):
+                target_id = uuid4()
+            else:
+                target_id = incoming_id
+            old_to_new_id[m["id"]] = target_id
+
+            app_name = m.get("app_name") or m.get("app") or None
+            app_obj = _resolve_app(app_name)
+            app_for_memory[m["id"]] = app_obj.name
+
+            mem_project = target_project
+            if export_version >= "2" and not project_slug and m.get("project_slug"):
+                try:
+                    pctx = resolve_project(auth, db, m["project_slug"], min_role=ProjectRole.read_write)
+                    if pctx:
+                        mem_project = pctx.project
+                except HTTPException:
+                    pass
+
+            content = m.get("content") or ""
+            if not content.strip():
+                skipped_count += 1
+                continue
+
+            if existing and (existing.user_id == user.id) and mode == "skip":
+                skipped_count += 1
+                continue
+
+            try:
+                mem_state = MemoryState(m.get("state", "active"))
             except Exception:
-                existing.state = MemoryState.active
-            existing.archived_at = _parse_iso(m.get("archived_at"))
-            existing.deleted_at = _parse_iso(m.get("deleted_at"))
-            existing.created_at = _parse_iso(m.get("created_at")) or existing.created_at
-            existing.updated_at = _parse_iso(m.get("updated_at")) or existing.updated_at
-            db.add(existing)
+                mem_state = MemoryState.active
+
+            metadata = m.get("metadata") or {}
+
+            if existing and (existing.user_id == user.id) and mode == "overwrite":
+                existing.app_id = app_obj.id
+                existing.project_id = mem_project.id
+                existing.content = content
+                existing.metadata_ = metadata
+                existing.state = mem_state
+                existing.archived_at = _parse_iso(m.get("archived_at"))
+                existing.deleted_at = _parse_iso(m.get("deleted_at"))
+                existing.created_at = _parse_iso(m.get("created_at")) or existing.created_at
+                existing.updated_at = _parse_iso(m.get("updated_at")) or existing.updated_at
+                if m.get("memory_type"):
+                    existing.memory_type = m["memory_type"]
+                if m.get("agent_id"):
+                    existing.agent_id = m["agent_id"]
+                if m.get("run_id"):
+                    existing.run_id = m["run_id"]
+                if m.get("expires_at"):
+                    existing.expires_at = _parse_iso(m["expires_at"])
+                db.add(existing)
+                db.commit()
+                imported_count += 1
+                continue
+
+            mem_kwargs = dict(
+                id=target_id, user_id=user.id, app_id=app_obj.id, project_id=mem_project.id,
+                content=content, metadata_=metadata,
+                state=mem_state,
+                created_at=_parse_iso(m.get("created_at")) or datetime.now(UTC),
+                updated_at=_parse_iso(m.get("updated_at")) or datetime.now(UTC),
+                archived_at=_parse_iso(m.get("archived_at")),
+                deleted_at=_parse_iso(m.get("deleted_at")),
+            )
+            if m.get("memory_type"):
+                mem_kwargs["memory_type"] = m["memory_type"]
+            if m.get("agent_id"):
+                mem_kwargs["agent_id"] = m["agent_id"]
+            if m.get("run_id"):
+                mem_kwargs["run_id"] = m["run_id"]
+            if m.get("expires_at"):
+                mem_kwargs["expires_at"] = _parse_iso(m["expires_at"])
+
+            new_mem = Memory(**mem_kwargs)
+            db.add(new_mem)
             db.commit()
             imported_count += 1
-            continue
 
-        new_mem = Memory(
-            id=target_id, user_id=user.id, app_id=app_obj.id, project_id=mem_project.id,
-            content=m.get("content") or "", metadata_=m.get("metadata") or {},
-            state=MemoryState(m.get("state", "active")) if m.get("state") else MemoryState.active,
-            created_at=_parse_iso(m.get("created_at")) or datetime.now(UTC),
-            updated_at=_parse_iso(m.get("updated_at")) or datetime.now(UTC),
-            archived_at=_parse_iso(m.get("archived_at")),
-            deleted_at=_parse_iso(m.get("deleted_at")),
-        )
-        db.add(new_mem)
-        db.commit()
-        imported_count += 1
+        except Exception as e:
+            db.rollback()
+            error_count += 1
+            logger.warning("Failed to import memory %s: %s", m.get("id", "?"), e)
 
     # --- Import memory_categories ---
     for link in sqlite_data.get("memory_categories", []):
@@ -819,6 +941,7 @@ async def import_backup(
         "project_slug": target_project.slug,
         "sqlite_imported": imported_count,
         "sqlite_skipped": skipped_count,
+        "sqlite_errors": error_count,
         "owner": auth.username,
     }
 
@@ -830,5 +953,6 @@ async def import_backup(
         "project_slug": target_project.slug,
         "imported": imported_count,
         "skipped": skipped_count,
+        "errors": error_count,
         "to_embed": len(embed_items),
     }
