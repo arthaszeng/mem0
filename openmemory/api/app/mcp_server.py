@@ -306,16 +306,10 @@ mcp_router = APIRouter(prefix="/memory-mcp")
 # Initialize SSE transport (legacy, kept for backward compat)
 sse = SseServerTransport("/memory-mcp/messages/")
 
-# Streamable HTTP session management
+# Streamable HTTP: persistent sessions keyed by mcp-session-id.
+# Each session has a long-lived background task running transport.connect() + mcp server.
 _streamable_sessions: dict[str, StreamableHTTPServerTransport] = {}
-
-def _get_or_create_streamable_transport(session_id: str | None) -> StreamableHTTPServerTransport:
-    if session_id and session_id in _streamable_sessions:
-        return _streamable_sessions[session_id]
-    transport = StreamableHTTPServerTransport(mcp_session_id=session_id)
-    if transport.mcp_session_id:
-        _streamable_sessions[transport.mcp_session_id] = transport
-    return transport
+_streamable_tasks: dict[str, asyncio.Task] = {}
 
 @mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something.")
 async def add_memories(
@@ -1357,33 +1351,54 @@ async def _run_sse_session(request: Request, uid: str, client_name: str, pslug: 
 # On the same paths as SSE (POST=streamable, GET=SSE for backward compat).
 # ---------------------------------------------------------------------------
 
-async def _run_streamable_session(request: Request, uid: str, client_name: str, pslug: str = ""):
-    """Handle a Streamable HTTP request (POST/GET/DELETE)."""
-    from starlette.responses import Response as StarletteResponse
-
-    session_id = request.headers.get("mcp-session-id")
-    transport = _get_or_create_streamable_transport(session_id)
-
-    user_token = user_id_var.set(uid)
-    client_token = client_name_var.set(client_name)
-    project_token = project_slug_var.set(pslug)
+async def _streamable_session_lifecycle(
+    transport: StreamableHTTPServerTransport,
+    uid: str, client_name: str, pslug: str,
+    ready: asyncio.Event,
+):
+    """Long-lived background task: keeps transport connected and MCP server running."""
+    user_id_var.set(uid)
+    client_name_var.set(client_name)
+    project_slug_var.set(pslug)
     try:
         async with transport.connect() as (r, w):
-            task = asyncio.create_task(
-                mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
-            )
-            try:
-                await transport.handle_request(request.scope, request.receive, request._send)
-            finally:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            ready.set()
+            await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
+    except asyncio.CancelledError:
+        pass
     finally:
-        user_id_var.reset(user_token)
-        client_name_var.reset(client_token)
-        project_slug_var.reset(project_token)
+        sid = transport.mcp_session_id
+        if sid:
+            _streamable_sessions.pop(sid, None)
+            _streamable_tasks.pop(sid, None)
+
+
+async def _run_streamable_session(request: Request, uid: str, client_name: str, pslug: str = ""):
+    """Handle a single Streamable HTTP request, creating or reusing a persistent session."""
+    session_id = request.headers.get("mcp-session-id")
+
+    if session_id and session_id in _streamable_sessions:
+        transport = _streamable_sessions[session_id]
+        await transport.handle_request(request.scope, request.receive, request._send)
+        return
+
+    transport = StreamableHTTPServerTransport(mcp_session_id=str(uuid.uuid4()))
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        _streamable_session_lifecycle(transport, uid, client_name, pslug, ready)
+    )
+    await ready.wait()
+
+    sid = transport.mcp_session_id
+    if sid:
+        _streamable_sessions[sid] = transport
+        _streamable_tasks[sid] = task
+
+    await transport.handle_request(request.scope, request.receive, request._send)
+
+    if transport.mcp_session_id and transport.mcp_session_id not in _streamable_sessions:
+        _streamable_sessions[transport.mcp_session_id] = transport
+        _streamable_tasks[transport.mcp_session_id] = task
 
 
 def _extract_params(request: Request):
