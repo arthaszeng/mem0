@@ -20,13 +20,13 @@ export const constants = {
   },
   memverse: {
     name: "Memverse",
-    icon: <Icon source="/images/memverse.svg" />,
-    iconImage: `${basePath}/images/memverse.svg`,
+    icon: <Icon source="/images/memverse.png" />,
+    iconImage: `${basePath}/images/memverse.png`,
   },
   openmemory: {
     name: "Memverse",
-    icon: <Icon source="/images/memverse.svg" />,
-    iconImage: `${basePath}/images/memverse.svg`,
+    icon: <Icon source="/images/memverse.png" />,
+    iconImage: `${basePath}/images/memverse.png`,
   },
   cursor: {
     name: "Cursor",

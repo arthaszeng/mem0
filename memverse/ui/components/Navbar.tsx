@@ -416,7 +416,7 @@ export function Navbar() {
         {/* Left: Logo + Project Selector */}
         <div className="flex items-center gap-3 flex-shrink-0">
           <Link href="/" className="flex items-center gap-2">
-            <Image src={`${basePath}/logo.svg`} alt="Memverse" width={26} height={26} />
+            <Image src={`${basePath}/logo.png`} alt="Memverse" width={26} height={26} />
             <span className="text-xl font-medium hidden sm:inline">Memverse</span>
             <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">v{appVersion}</span>
           </Link>

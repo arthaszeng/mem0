@@ -59,7 +59,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-8 px-6">
         <div className="flex flex-col items-center gap-3">
           <Image
-            src={`${basePath}/logo.svg`}
+            src={`${basePath}/logo.png`}
             alt="Memverse"
             width={48}
             height={48}

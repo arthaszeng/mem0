@@ -14,7 +14,7 @@ export const metadata = {
   description: "Manage your Memverse integration and stored memories",
   generator: "v0.dev",
   icons: {
-    icon: `${basePath}/logo.svg`,
+    icon: `${basePath}/logo.png`,
   },
 };
 
