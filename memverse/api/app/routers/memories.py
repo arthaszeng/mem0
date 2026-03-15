@@ -995,6 +995,12 @@ async def delete_memories(
         except Exception as delete_error:
             logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
+        try:
+            from app.utils.graph_store import remove_entities_for_memory
+            remove_entities_for_memory(str(memory_id))
+        except Exception as graph_error:
+            logging.warning(f"Failed to remove entities for memory {memory_id}: {graph_error}")
+
         update_memory_state(db, memory_id, MemoryState.deleted, user.id)
 
     return {"message": f"Successfully deleted {len(request.memory_ids)} memories"}

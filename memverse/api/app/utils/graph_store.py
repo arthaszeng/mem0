@@ -96,6 +96,50 @@ def add_entities(entities: List[dict], relations: List[dict], memory_id: str):
         logger.error("Failed to add entities to graph: %s", e)
 
 
+def remove_entities_for_memory(memory_id: str):
+    """Remove a memory's footprint from the graph.
+
+    - Deletes all RELATES_TO edges with this memory_id
+    - Removes memory_id from every Entity.memory_ids list
+    - Deletes entities whose memory_ids become empty
+    """
+    conn = _get_connection()
+    if not conn:
+        return
+
+    try:
+        mid = _escape(memory_id)
+
+        conn.execute(
+            f"MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) WHERE r.memory_id = '{mid}' DELETE r"
+        )
+
+        rows = _query_rows(conn, f"MATCH (e:Entity) WHERE list_contains(e.memory_ids, '{mid}') RETURN e.name, e.memory_ids")
+        for row in rows:
+            name = _escape(row[0])
+            remaining = [m for m in row[1] if m != memory_id]
+            if not remaining:
+                conn.execute(f"MATCH (e:Entity) WHERE e.name = '{name}' DETACH DELETE e")
+            else:
+                ids_literal = ", ".join(f"'{_escape(m)}'" for m in remaining)
+                conn.execute(f"MATCH (e:Entity) WHERE e.name = '{name}' SET e.memory_ids = [{ids_literal}]")
+    except Exception as e:
+        logger.error("Failed to remove entities for memory %s: %s", memory_id, e)
+
+
+def clear_all_entities():
+    """Delete all entities and relations from the graph."""
+    conn = _get_connection()
+    if not conn:
+        return
+
+    try:
+        conn.execute("MATCH (e:Entity) DETACH DELETE e")
+        logger.info("Cleared all entities from Kuzu graph store")
+    except Exception as e:
+        logger.error("Failed to clear graph store: %s", e)
+
+
 def search_entities(query: str, limit: int = 20) -> List[dict]:
     """Search entities by name substring match, returns entities with relations."""
     conn = _get_connection()

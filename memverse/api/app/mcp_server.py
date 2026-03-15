@@ -685,16 +685,19 @@ async def delete_memories(memory_ids: list[str]) -> str:
                 except Exception as delete_error:
                     logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
-            # Update each memory's state and create history entries
+                try:
+                    from app.utils.graph_store import remove_entities_for_memory
+                    remove_entities_for_memory(str(memory_id))
+                except Exception as graph_error:
+                    logging.warning(f"Failed to remove entities for memory {memory_id}: {graph_error}")
+
             now = datetime.datetime.now(datetime.UTC)
             for memory_id in ids_to_delete:
                 memory = db.query(Memory).filter(Memory.id == memory_id).first()
                 if memory:
-                    # Update memory state
                     memory.state = MemoryState.deleted
                     memory.deleted_at = now
 
-                    # Create history entry
                     history = MemoryStatusHistory(
                         memory_id=memory_id,
                         changed_by=user.id,
@@ -703,7 +706,6 @@ async def delete_memories(memory_ids: list[str]) -> str:
                     )
                     db.add(history)
 
-                    # Create access log entry
                     access_log = MemoryAccessLog(
                         memory_id=memory_id,
                         app_id=app.id,
@@ -750,7 +752,12 @@ async def delete_all_memories() -> str:
                 except Exception as delete_error:
                     logging.warning(f"Failed to delete memory {memory_id} from vector store: {delete_error}")
 
-            # Update each memory's state and create history entries
+            try:
+                from app.utils.graph_store import clear_all_entities
+                clear_all_entities()
+            except Exception as graph_error:
+                logging.warning(f"Failed to clear Kuzu graph store: {graph_error}")
+
             now = datetime.datetime.now(datetime.UTC)
             for memory_id in accessible_memory_ids:
                 memory = db.query(Memory).filter(Memory.id == memory_id).first()

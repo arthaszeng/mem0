@@ -278,11 +278,20 @@ async def clear_user_data(
                 )
                 qdrant_deleted = len(all_point_ids)
 
-    logger.info("Cleared %d SQLite memories + %d Qdrant points for user %s", sqlite_deleted, qdrant_deleted, user.user_id)
+    graph_cleared = False
+    try:
+        from app.utils.graph_store import clear_all_entities
+        clear_all_entities()
+        graph_cleared = True
+    except Exception as graph_error:
+        logger.warning("Failed to clear Kuzu graph store: %s", graph_error)
+
+    logger.info("Cleared %d SQLite memories + %d Qdrant points + graph=%s for user %s", sqlite_deleted, qdrant_deleted, graph_cleared, user.user_id)
     return {
         "message": f"Cleared all memory data for '{user.user_id}'",
         "sqlite_deleted": sqlite_deleted,
         "qdrant_deleted": qdrant_deleted,
+        "graph_cleared": graph_cleared,
     }
 
 
