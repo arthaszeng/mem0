@@ -912,7 +912,7 @@ async def import_backup(
         metadata = rec.get("metadata") or {}
         created_at = rec.get("created_at")
         updated_at = rec.get("updated_at")
-        rec_app_name = rec.get("app") or rec.get("app_name") or app_for_memory.get(old_id, "memverse")
+        rec_app_name = rec.get("app") or rec.get("app_name") or app_for_memory.get(old_id, "Memverse")
 
         payload = dict(metadata)
         for stale_key in ("creator_username", "owner", "exported_by"):
@@ -924,7 +924,7 @@ async def import_backup(
             payload["updated_at"] = updated_at
         payload["user_id"] = auth.username
         payload["project_id"] = str(target_project.id)
-        payload["source_app"] = "memverse"
+        payload["source_app"] = "Memverse"
         payload["mcp_client"] = rec_app_name
 
         embed_items.append({"id": str(new_id), "content": rec_content, "payload": payload})
