@@ -428,7 +428,7 @@
         }
       }
     },
-    "/memory-api/api/v1/memories/stats/insights": {
+    "/api/v1/memories/stats/insights": {
       "get": {
         "operationId": "getMemoryInsights",
         "summary": "Get intelligent insights about stored memories",
