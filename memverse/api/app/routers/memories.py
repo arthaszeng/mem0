@@ -42,6 +42,19 @@ router = APIRouter(prefix="/api/v1/memories", tags=["memories"])
 _profile_cache: dict[str, tuple[dict, datetime]] = {}
 
 
+def _extract_entities_background(memory_id: UUID, content: str):
+    """Background task: extract entities from memory and store in Kuzu graph."""
+    try:
+        from app.utils.entity_extraction import extract_entities
+        from app.utils.graph_store import add_entities
+        result = extract_entities(content)
+        if result.get("entities"):
+            add_entities(result["entities"], result.get("relations", []), str(memory_id))
+            logging.info("Extracted %d entities from memory %s", len(result["entities"]), memory_id)
+    except Exception as e:
+        logging.warning("Entity extraction failed for %s: %s", memory_id, e)
+
+
 def get_memory_or_404(db: Session, memory_id: UUID) -> Memory:
     memory = db.query(Memory).filter(Memory.id == memory_id).first()
     if not memory:
@@ -759,6 +772,9 @@ async def create_memory(
                 for memory in changed_memories:
                     background_tasks.add_task(
                         categorize_memory_background, memory.id, memory.content
+                    )
+                    background_tasks.add_task(
+                        _extract_entities_background, memory.id, memory.content
                     )
 
                 return changed_memories[0]

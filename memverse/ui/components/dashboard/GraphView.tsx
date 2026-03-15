@@ -4,8 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import api from "@/lib/api";
 import { useProjectSlug } from "@/hooks/useProjectSlug";
 import { Loader2, Network, AlertCircle } from "lucide-react";
-
-import ForceGraph2D from "react-force-graph-2d";
+import ForceGraph2D, { ForceGraphMethods } from "react-force-graph-2d";
 
 const TYPE_COLORS: Record<string, string> = {
   person: "#3b82f6",
@@ -48,6 +47,8 @@ export function GraphView() {
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const graphRef = useRef<ForceGraphMethods<any, any>>(undefined);
   const [dimensions, setDimensions] = useState({ width: 800, height: GRAPH_HEIGHT });
 
   useEffect(() => {
@@ -142,6 +143,12 @@ export function GraphView() {
     setSelectedNode(null);
   }, []);
 
+  const handleEngineStop = useCallback(() => {
+    if (graphRef.current) {
+      graphRef.current.zoomToFit(400, 40);
+    }
+  }, []);
+
   const headerContent = (
     <div className="bg-zinc-800 border-b border-zinc-800 rounded-t-lg px-4 py-3 flex items-center justify-between">
       <div className="text-white text-lg font-semibold flex items-center gap-2">
@@ -195,6 +202,7 @@ export function GraphView() {
       {headerContent}
       <div className="overflow-hidden" style={{ height: GRAPH_HEIGHT }} ref={containerRef}>
         <ForceGraph2D
+          ref={graphRef}
           graphData={graphData}
           width={dimensions.width}
           height={dimensions.height}
@@ -204,10 +212,13 @@ export function GraphView() {
           onNodeHover={handleNodeHover}
           onNodeClick={handleNodeClick}
           onBackgroundClick={handleBackgroundClick}
+          onEngineStop={handleEngineStop}
           backgroundColor="rgb(24 24 27)"
           linkColor={() => "rgba(113, 113, 122, 0.4)"}
           nodeRelSize={4}
           cooldownTicks={100}
+          d3AlphaDecay={0.05}
+          d3VelocityDecay={0.3}
           enableZoomInteraction={true}
           enablePanInteraction={true}
         />

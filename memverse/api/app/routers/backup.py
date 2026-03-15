@@ -938,6 +938,9 @@ async def import_backup(
     if embed_items:
         asyncio.create_task(_embed_worker(task_id, embed_items))
 
+    # Trigger entity extraction for imported memories in background
+    asyncio.create_task(_backfill_entities_for_import(embed_items))
+
     return {
         "task_id": task_id,
         "project_slug": target_project.slug,
@@ -946,3 +949,23 @@ async def import_backup(
         "errors": error_count,
         "to_embed": len(embed_items),
     }
+
+
+async def _backfill_entities_for_import(items: List[Dict[str, Any]]) -> None:
+    """Background: extract entities from imported memories after embedding."""
+    from app.utils.entity_extraction import extract_entities
+    from app.utils.graph_store import add_entities
+
+    def _run():
+        count = 0
+        for item in items:
+            try:
+                result = extract_entities(item["content"])
+                if result.get("entities"):
+                    add_entities(result["entities"], result.get("relations", []), item["id"])
+                    count += 1
+            except Exception as e:
+                logger.warning("Import entity extraction failed for %s: %s", item["id"], e)
+        logger.info("Import entity backfill: %d/%d memories produced entities", count, len(items))
+
+    await asyncio.to_thread(_run)
