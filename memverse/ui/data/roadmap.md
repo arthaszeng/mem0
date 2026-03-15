@@ -120,6 +120,7 @@ LLM 智能分类 + 敏感信息脱敏 + 批量修复历史数据
 - [x] **Graph-Enhanced Search** — search_memory 结果融合图谱关联实体（v1.1 已实现，score 0.6 融合）
 - [x] **知识图谱可视化** — 力导向图 UI，节点按实体类型着色，Dashboard 集成
 - [x] **删除链路闭环** — 删除记忆/项目/用户时同步清理 Kuzu 图实体和关系，五条删除路径全覆盖
+- [x] **实体用户隔离** — 所有 entity 端点（REST + MCP）按用户/项目的 memory 归属关系过滤，防止跨用户泄露
 
 ## v1.1 | Entity Scoping | completed | 2026-03 | layers
 
