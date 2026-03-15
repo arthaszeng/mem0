@@ -35,6 +35,7 @@ from fastapi import FastAPI, Request
 from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from sqlalchemy.orm import joinedload
 
@@ -302,8 +303,19 @@ def _resolve_project(db, user_id: int) -> "tuple[str | None, str | None]":
 # Create a router for MCP endpoints
 mcp_router = APIRouter(prefix="/memory-mcp")
 
-# Initialize SSE transport
+# Initialize SSE transport (legacy, kept for backward compat)
 sse = SseServerTransport("/memory-mcp/messages/")
+
+# Streamable HTTP session management
+_streamable_sessions: dict[str, StreamableHTTPServerTransport] = {}
+
+def _get_or_create_streamable_transport(session_id: str | None) -> StreamableHTTPServerTransport:
+    if session_id and session_id in _streamable_sessions:
+        return _streamable_sessions[session_id]
+    transport = StreamableHTTPServerTransport(mcp_session_id=session_id)
+    if transport.mcp_session_id:
+        _streamable_sessions[transport.mcp_session_id] = transport
+    return transport
 
 @mcp.tool(description="Add a new memory. This method is called everytime the user informs anything about themselves, their preferences, or anything that has any relevant information which can be useful in the future conversation. This can also be called when the user asks you to remember something.")
 async def add_memories(
@@ -1322,6 +1334,10 @@ def _read_gateway_user(request: Request) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# SSE transport (legacy) — kept for backward compatibility with older clients
+# ---------------------------------------------------------------------------
+
 async def _run_sse_session(request: Request, uid: str, client_name: str, pslug: str = ""):
     """Common SSE session handler that sets all context vars."""
     user_token = user_id_var.set(uid)
@@ -1336,56 +1352,90 @@ async def _run_sse_session(request: Request, uid: str, client_name: str, pslug: 
         project_slug_var.reset(project_token)
 
 
-# --- Project-scoped SSE routes (preferred) ---
+# ---------------------------------------------------------------------------
+# Streamable HTTP transport — preferred by Cursor and newer MCP clients.
+# On the same paths as SSE (POST=streamable, GET=SSE for backward compat).
+# ---------------------------------------------------------------------------
 
-@mcp_router.get("/p/{project_slug}/{client_name}/sse")
-async def handle_sse_project(request: Request):
-    """Project-scoped SSE endpoint – user identity from gateway headers."""
+async def _run_streamable_session(request: Request, uid: str, client_name: str, pslug: str = ""):
+    """Handle a Streamable HTTP request (POST/GET/DELETE)."""
+    from starlette.responses import Response as StarletteResponse
+
+    session_id = request.headers.get("mcp-session-id")
+    transport = _get_or_create_streamable_transport(session_id)
+
+    user_token = user_id_var.set(uid)
+    client_token = client_name_var.set(client_name)
+    project_token = project_slug_var.set(pslug)
+    try:
+        async with transport.connect() as (r, w):
+            task = asyncio.create_task(
+                mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
+            )
+            try:
+                await transport.handle_request(request.scope, request.receive, request._send)
+            finally:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+    finally:
+        user_id_var.reset(user_token)
+        client_name_var.reset(client_token)
+        project_slug_var.reset(project_token)
+
+
+def _extract_params(request: Request):
+    """Extract uid, client_name, project_slug from request path params + headers."""
     uid = _read_gateway_user(request)
     client_name = request.path_params.get("client_name", "")
     pslug = request.path_params.get("project_slug", "")
-    await _run_sse_session(request, uid, client_name, pslug)
+    return uid, client_name, pslug
 
 
-@mcp_router.get("/p/{project_slug}/{client_name}/sse/{user_id}")
-async def handle_sse_project_compat(request: Request):
-    """Project-scoped SSE endpoint with user_id in path (backward compat)."""
-    uid = _read_gateway_user(request)
-    client_name = request.path_params.get("client_name", "")
-    pslug = request.path_params.get("project_slug", "")
-    await _run_sse_session(request, uid, client_name, pslug)
+async def _handle_mcp_endpoint(request: Request):
+    """Unified handler: POST → Streamable HTTP, GET → SSE (legacy)."""
+    uid, client_name, pslug = _extract_params(request)
+    if request.method == "POST":
+        await _run_streamable_session(request, uid, client_name, pslug)
+    else:
+        await _run_sse_session(request, uid, client_name, pslug)
 
 
-# --- Legacy routes (no project context, fall back to default project) ---
+# --- Project-scoped routes ---
 
-@mcp_router.get("/{client_name}/sse")
-async def handle_sse_new(request: Request):
-    """SSE endpoint – user identity from gateway headers, no project context."""
-    uid = _read_gateway_user(request)
-    client_name = request.path_params.get("client_name", "")
-    await _run_sse_session(request, uid, client_name)
+@mcp_router.api_route("/p/{project_slug}/{client_name}/sse", methods=["GET", "POST", "DELETE"])
+async def handle_mcp_project(request: Request):
+    await _handle_mcp_endpoint(request)
 
+@mcp_router.api_route("/p/{project_slug}/{client_name}/sse/{user_id}", methods=["GET", "POST", "DELETE"])
+async def handle_mcp_project_compat(request: Request):
+    await _handle_mcp_endpoint(request)
 
-@mcp_router.get("/{client_name}/sse/{user_id}")
-async def handle_sse_compat(request: Request):
-    """Backward-compatible SSE endpoint with user_id in path."""
-    uid = _read_gateway_user(request)
-    client_name = request.path_params.get("client_name", "")
-    await _run_sse_session(request, uid, client_name)
+# --- Legacy routes (no project context) ---
 
+@mcp_router.api_route("/{client_name}/sse", methods=["GET", "POST", "DELETE"])
+async def handle_mcp_new(request: Request):
+    await _handle_mcp_endpoint(request)
+
+@mcp_router.api_route("/{client_name}/sse/{user_id}", methods=["GET", "POST", "DELETE"])
+async def handle_mcp_compat(request: Request):
+    await _handle_mcp_endpoint(request)
+
+# --- SSE message endpoints (legacy POST for SSE transport) ---
 
 @mcp_router.post("/messages/")
 async def handle_messages_root(request: Request):
-    return await _handle_post_message(request)
-
+    return await _handle_sse_post_message(request)
 
 @mcp_router.post("/{client_name}/sse/{user_id}/messages/")
 async def handle_messages_compat(request: Request):
-    return await _handle_post_message(request)
+    return await _handle_sse_post_message(request)
 
 
-async def _handle_post_message(request: Request):
-    """Handle POST messages for SSE."""
+async def _handle_sse_post_message(request: Request):
+    """Handle POST messages for legacy SSE transport."""
     body = await request.body()
 
     async def receive():
