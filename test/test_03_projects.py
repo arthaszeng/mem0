@@ -101,3 +101,17 @@ class TestProjectCascadeDelete:
         r = api_delete(user_a_token, f"/api/v1/projects/{slug}")
         assert r.status_code == 200
         assert r.json()["deleted_memories"] >= 0
+
+    def test_delete_project_then_memories_404(self, user_a_token):
+        slug = f"e2e-cas404-{uuid.uuid4().hex[:6]}"
+        create_project(user_a_token, "CascadeMem404", slug)
+        create_memory(user_a_token, "cascade 404 test mem", slug)
+        time.sleep(3)
+        items = api_get(user_a_token, "/api/v1/memories/", params={
+            "project_slug": slug, "page": 1, "size": 50,
+        }).json().get("items", [])
+        mem_ids = [i["id"] for i in items]
+        api_delete(user_a_token, f"/api/v1/projects/{slug}")
+        for mid in mem_ids:
+            r = api_get(user_a_token, f"/api/v1/memories/{mid}")
+            assert r.status_code == 404

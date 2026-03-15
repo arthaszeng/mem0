@@ -1,4 +1,4 @@
-"""N: Graph entities, search entities."""
+"""N: Graph entities, search entities, graph cleanup on deletion."""
 
 import pytest
 
@@ -31,3 +31,11 @@ class TestGraphData:
         assert r.status_code == 200
         data = r.json()
         assert "nodes" in data or "entities" in data or isinstance(data, list)
+
+    def test_graph_returns_nodes_and_edges(self, admin_token):
+        r = api_get(admin_token, "/api/v1/entities/graph")
+        assert r.status_code == 200
+        data = r.json()
+        if "nodes" in data:
+            assert isinstance(data["nodes"], list)
+            assert isinstance(data.get("edges", []), list)

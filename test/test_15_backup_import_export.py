@@ -308,6 +308,19 @@ class TestImportStatus:
         assert r.status_code == 404
 
 
+class TestClearData:
+    """Clear-data endpoint should wipe SQLite + Qdrant + Kuzu graph."""
+
+    def test_clear_data_returns_graph_cleared(self, admin_token):
+        r = api_post(admin_token, "/api/v1/backup/clear-data")
+        assert r.status_code == 200
+        data = r.json()
+        assert "sqlite_deleted" in data
+        assert "qdrant_deleted" in data
+        assert "graph_cleared" in data
+        assert data["graph_cleared"] is True
+
+
 class TestSyntheticImport:
     """Import a synthetically constructed ZIP to test edge cases."""
 
