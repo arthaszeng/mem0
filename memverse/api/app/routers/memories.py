@@ -606,6 +606,45 @@ async def backfill_categories(
     return {"scheduled": len(uncategorized), "memory_ids": [str(m.id) for m in uncategorized]}
 
 
+@router.post("/backfill-entities")
+async def backfill_entities(
+    limit: int = Query(0, ge=0, description="0 = all active memories"),
+    background_tasks: BackgroundTasks = None,
+    auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    """Extract entities from all active memories and populate the knowledge graph.
+    Set limit=0 (default) to process all memories."""
+    from app.utils.entity_extraction import extract_entities
+    from app.utils.graph_store import add_entities
+
+    user = auth.db_user
+    q = (
+        db.query(Memory)
+        .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+        .order_by(Memory.updated_at.desc())
+    )
+    if limit > 0:
+        q = q.limit(limit)
+    memories = q.all()
+
+    def _backfill_batch(mems):
+        count = 0
+        for mem in mems:
+            try:
+                result = extract_entities(mem.content)
+                if result.get("entities"):
+                    add_entities(result["entities"], result.get("relations", []), str(mem.id))
+                    count += 1
+            except Exception as e:
+                logging.warning("Entity backfill failed for %s: %s", mem.id, e)
+        logging.info("Backfill complete: %d/%d memories produced entities", count, len(mems))
+
+    background_tasks.add_task(_backfill_batch, memories)
+
+    return {"scheduled": len(memories), "memory_ids": [str(m.id) for m in memories]}
+
+
 # Create new memory
 @router.post("/")
 async def create_memory(
