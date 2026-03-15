@@ -16,7 +16,6 @@ class TestAnalytics:
         data = r.json()
         assert "memory_growth" in data
         assert "category_distribution" in data
-        assert "agent_activity" in data
         assert "recent_activity" in data
 
     def test_analytics_scoped_to_project(self, user_a_token):
@@ -66,10 +65,12 @@ class TestInsights:
 
 
 class TestStatsEndpoints:
-    def test_types_endpoint(self, admin_token):
+    def test_types_endpoint_removed(self, admin_token):
+        """v1.7 dropped memory_type column; endpoint should 404."""
         r = api_get(admin_token, "/api/v1/memories/stats/types")
-        assert r.status_code == 200
+        assert r.status_code == 404
 
-    def test_agents_endpoint(self, admin_token):
+    def test_agents_endpoint_removed(self, admin_token):
+        """v1.7 dropped agent_id column; endpoint should 404."""
         r = api_get(admin_token, "/api/v1/memories/stats/agents")
-        assert r.status_code == 200
+        assert r.status_code == 404
