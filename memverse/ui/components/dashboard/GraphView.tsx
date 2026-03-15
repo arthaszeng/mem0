@@ -49,6 +49,7 @@ export function GraphView() {
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<ForceGraphMethods<any, any>>(undefined);
+  const fittedRef = useRef(false);
   const [dimensions, setDimensions] = useState({ width: 800, height: GRAPH_HEIGHT });
 
   useEffect(() => {
@@ -78,8 +79,9 @@ export function GraphView() {
   const graphData = React.useMemo(() => {
     if (!data?.nodes?.length) return null;
     const nodeIds = new Set(data.nodes.map((n) => n.id));
+    fittedRef.current = false;
     return {
-      nodes: data.nodes,
+      nodes: data.nodes.map((n) => ({ ...n })),
       links: data.edges
         .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
         .map((e) => ({ source: e.source, target: e.target, relation: e.relation })),
@@ -143,9 +145,20 @@ export function GraphView() {
     setSelectedNode(null);
   }, []);
 
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (!fg || !graphData) return;
+    fg.d3Force("charge")?.strength(-120);
+    fg.d3Force("center")?.strength(1);
+    fg.d3Force("link")?.distance(30);
+  }, [graphData]);
+
   const handleEngineStop = useCallback(() => {
-    if (graphRef.current) {
-      graphRef.current.zoomToFit(400, 40);
+    if (graphRef.current && !fittedRef.current) {
+      fittedRef.current = true;
+      setTimeout(() => {
+        graphRef.current?.zoomToFit(600, 60);
+      }, 300);
     }
   }, []);
 
