@@ -22,6 +22,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 
+import httpx
+
 from .auth.cookie_store import cookie_store
 from .client import ConciergeClient
 from .stream_parser import ConciergeStreamError
@@ -45,13 +47,36 @@ concierge = ConciergeClient(
 )
 
 
+_OPENMEMORY_URL = os.getenv("OPENMEMORY_URL", "http://openmemory-mcp:8765")
+_MEMORY_SYNC_TRUNCATE = 2000
+
+
+async def _save_to_memory(username: str, text: str):
+    """Fire-and-forget: save a Concierge interaction to OpenMemory."""
+    try:
+        truncated = text[:_MEMORY_SYNC_TRUNCATE] + "…" if len(text) > _MEMORY_SYNC_TRUNCATE else text
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                f"{_OPENMEMORY_URL}/api/v1/memories/",
+                json={"text": truncated, "app": "Concierge", "infer": True},
+                headers={
+                    "X-Auth-User-Id": username,
+                    "X-Auth-Username": username,
+                },
+            )
+            if resp.status_code != 200:
+                logger.warning("Memory sync failed (%s): %s", resp.status_code, resp.text[:200])
+            else:
+                logger.info("Memory synced for user=%s (status=%s)", username, resp.status_code)
+    except Exception as e:
+        logger.warning("Memory sync error [%s]: %r", type(e).__name__, e)
+
+
 def _get_access_token() -> str:
     uid = user_id_var.get(None)
     if not uid:
         raise ConciergeStreamError("Not authenticated — no user context available")
     token = cookie_store.get(uid)
-    if not token and _is_dev_mode():
-        token = cookie_store.get_any()
     if not token:
         raise ConciergeStreamError("No Concierge session — sync cookies via Chrome extension first")
     return token
@@ -67,8 +92,11 @@ def _get_access_token() -> str:
 async def concierge_chat(message: str, thread_id: str = "") -> str:
     """Chat with Concierge AI."""
     token = _get_access_token()
+    uid = user_id_var.get()
     tid = thread_id if thread_id else None
-    return await concierge.chat(token, message, thread_id=tid)
+    response = await concierge.chat(token, message, thread_id=tid)
+    asyncio.create_task(_save_to_memory(uid, f"Q: {message}\nA: {response}"))
+    return response
 
 
 @mcp.tool(
@@ -78,8 +106,11 @@ async def concierge_chat(message: str, thread_id: str = "") -> str:
 async def concierge_search(query: str) -> str:
     """Search via Concierge AI."""
     token = _get_access_token()
+    uid = user_id_var.get()
     search_prompt = f"Search for: {query}\n\nPlease provide a concise summary of the most relevant results."
-    return await concierge.chat(token, search_prompt)
+    response = await concierge.chat(token, search_prompt)
+    asyncio.create_task(_save_to_memory(uid, f"Search: {query}\nResults: {response}"))
+    return response
 
 
 # ---------- FastAPI app ----------
@@ -271,6 +302,7 @@ async def api_chat(request: Request):
 
     try:
         result = await concierge.chat(token, message, thread_id=thread_id or None)
+        asyncio.create_task(_save_to_memory(username, f"Q: {message}\nA: {result}"))
         return {"response": result, "thread_id": thread_id}
     except ConciergeStreamError as e:
         return JSONResponse(status_code=502, content={"error": str(e)})
@@ -292,6 +324,7 @@ async def api_search(request: Request):
     try:
         search_prompt = f"Search for: {query}\n\nPlease provide a concise summary of the most relevant results."
         result = await concierge.chat(token, search_prompt)
+        asyncio.create_task(_save_to_memory(username, f"Search: {query}\nResults: {result}"))
         return {"response": result, "query": query}
     except ConciergeStreamError as e:
         return JSONResponse(status_code=502, content={"error": str(e)})

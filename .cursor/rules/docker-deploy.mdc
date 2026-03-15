@@ -78,6 +78,24 @@ alwaysApply: true
   backup/              # 按版本号备份
 ```
 
+## ⚠️ 铁律：部署后清理本地镜像
+
+**每次云端部署完成后，必须清理本地构建产生的 amd64 镜像和悬空层，减少磁盘占用。**
+
+```bash
+# 1. 先删除 ACR tag 引用（否则 amd64 镜像因多 tag 引用无法删除）
+docker images --format "{{.Repository}}:{{.Tag}}" | grep "crpi-.*arthaszeng" | xargs -r docker rmi 2>/dev/null || true
+# 2. 删除本次构建的 amd64 镜像（不影响本地 arm64 镜像）
+docker images --format "{{.Repository}}:{{.Tag}}" | grep "\-amd64" | xargs -r docker rmi 2>/dev/null || true
+# 3. 清理悬空镜像和构建缓存
+docker image prune -f
+docker builder prune -f --filter "until=24h"
+```
+
+- 在 `deploy-cloud.sh` 流程的最后一步（健康检查通过后）执行
+- 仅清理 `*-amd64` tag 的镜像，不影响本地开发用的 arm64 镜像
+- 如果手动分步执行（build → push → deploy），在 push 成功后即可清理
+
 ## ACR 镜像仓库
 
 - 公网: `crpi-xsgmoqneyleca8gg.cn-chengdu.personal.cr.aliyuncs.com`

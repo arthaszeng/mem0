@@ -58,6 +58,8 @@ services:
   concierge-mcp:
     image: mem0/concierge-mcp:${APP_VERSION:-latest}
     env_file: .env
+    depends_on:
+      - openmemory-mcp
     ports:
       - "127.0.0.1:8767:8767"
     restart: unless-stopped
