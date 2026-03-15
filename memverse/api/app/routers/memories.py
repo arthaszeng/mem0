@@ -1528,27 +1528,66 @@ async def check_contradiction_endpoint(
 entities_router = APIRouter(prefix="/api/v1/entities", tags=["entities"])
 
 
+def _get_accessible_memory_ids(
+    auth: AuthenticatedUser, db: Session, project_slug: Optional[str] = None,
+) -> set[str]:
+    """Return the set of memory_id strings the current user may see.
+
+    If *project_slug* is given, scope to that project; otherwise scope to all
+    active memories owned by the user.
+    """
+    if project_slug:
+        pctx = resolve_project(auth, db, project_slug)
+        if pctx:
+            filters = [Memory.state == MemoryState.active, Memory.project_id == pctx.project_id]
+        else:
+            filters = [Memory.state == MemoryState.active, Memory.user_id == auth.db_user.id]
+    else:
+        filters = [Memory.state == MemoryState.active, Memory.user_id == auth.db_user.id]
+    return {str(r[0]) for r in db.query(Memory.id).filter(*filters).all()}
+
+
+def _filter_entities_by_memory_ids(entities: list[dict], allowed: set[str]) -> list[dict]:
+    """Keep only entities whose memory_ids overlap with *allowed*."""
+    return [
+        e for e in entities
+        if any(mid in allowed for mid in (e.get("memory_ids") or []))
+    ]
+
+
 @entities_router.get("/")
 async def list_graph_entities(
     limit: int = Query(100, ge=1, le=500),
+    project_slug: Optional[str] = Query(None),
     auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    """List all entities in the knowledge graph."""
+    """List entities in the knowledge graph scoped to the current user/project."""
     from app.utils.graph_store import list_entities
-    entities = await asyncio.to_thread(list_entities, limit)
-    return {"entities": entities, "total": len(entities)}
+    all_entities = await asyncio.to_thread(list_entities, limit * 3)
+    allowed = _get_accessible_memory_ids(auth, db, project_slug)
+    filtered = _filter_entities_by_memory_ids(all_entities, allowed)[:limit]
+    for e in filtered:
+        e.pop("memory_ids", None)
+    return {"entities": filtered, "total": len(filtered)}
 
 
 @entities_router.get("/search")
 async def search_graph_entities(
     query: str = Query(..., description="Entity name to search for"),
     limit: int = Query(20, ge=1, le=100),
+    project_slug: Optional[str] = Query(None),
     auth: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
 ):
-    """Search entities in the knowledge graph by name."""
+    """Search entities scoped to the current user/project."""
     from app.utils.graph_store import search_entities
-    results = await asyncio.to_thread(search_entities, query, limit)
-    return {"entities": results, "total": len(results)}
+    all_results = await asyncio.to_thread(search_entities, query, limit * 3)
+    allowed = _get_accessible_memory_ids(auth, db, project_slug)
+    filtered = _filter_entities_by_memory_ids(all_results, allowed)[:limit]
+    for e in filtered:
+        e.pop("memory_ids", None)
+    return {"entities": filtered, "total": len(filtered)}
 
 
 @entities_router.get("/graph")
@@ -1558,30 +1597,23 @@ async def get_entities_graph(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Return full graph data (nodes + edges) for visualization."""
+    """Return full graph data (nodes + edges) scoped to the current user/project."""
     from app.utils.graph_store import get_full_graph
 
-    data = await asyncio.to_thread(get_full_graph, limit)
+    data = await asyncio.to_thread(get_full_graph, limit * 3)
+    allowed = _get_accessible_memory_ids(auth, db, project_slug)
 
-    if project_slug:
-        pctx = resolve_project(auth, db, project_slug)
-        if pctx:
-            filters = [Memory.state == MemoryState.active, Memory.project_id == pctx.project_id]
-        else:
-            filters = [Memory.state == MemoryState.active, Memory.user_id == auth.db_user.id]
-        project_memory_ids = {str(r[0]) for r in db.query(Memory.id).filter(*filters).all()}
-        if project_memory_ids:
-            valid_nodes = {
-                n["id"] for n in data["nodes"]
-                if any(mid in project_memory_ids for mid in n.get("memory_ids", []))
-            }
-            data["edges"] = [
-                e for e in data["edges"]
-                if e.get("memory_id") in project_memory_ids
-                and e["source"] in valid_nodes
-                and e["target"] in valid_nodes
-            ]
-            data["nodes"] = [n for n in data["nodes"] if n["id"] in valid_nodes]
+    valid_nodes = {
+        n["id"] for n in data["nodes"]
+        if any(mid in allowed for mid in n.get("memory_ids", []))
+    }
+    data["nodes"] = [n for n in data["nodes"] if n["id"] in valid_nodes][:limit]
+    data["edges"] = [
+        e for e in data["edges"]
+        if e.get("memory_id") in allowed
+        and e["source"] in valid_nodes
+        and e["target"] in valid_nodes
+    ]
 
     for n in data["nodes"]:
         n.pop("memory_ids", None)

@@ -1196,6 +1196,26 @@ async def export_memories(format: str = "json") -> str:
         return f"Error exporting memories: {e}"
 
 
+def _mcp_get_allowed_memory_ids() -> set[str]:
+    """Return memory IDs accessible to the current MCP user."""
+    uid = user_id_var.get(None)
+    if not uid:
+        return set()
+    db = SessionLocal()
+    try:
+        user, _ = get_user_and_app(db, user_id=uid, app_id=client_name_var.get("unknown"))
+        rows = db.query(Memory.id).filter(Memory.user_id == user.id, Memory.state == MemoryState.active).all()
+        return {str(r[0]) for r in rows}
+    except Exception:
+        return set()
+    finally:
+        db.close()
+
+
+def _filter_entities_by_allowed(entities: list[dict], allowed: set[str]) -> list[dict]:
+    return [e for e in entities if any(mid in allowed for mid in (e.get("memory_ids") or []))]
+
+
 @mcp.tool(description="Search the knowledge graph for entities (people, projects, technologies) and their relationships. Use when the user asks about connections between concepts or wants to explore related knowledge.")
 async def search_entities(query: str, limit: int = 20) -> str:
     """
@@ -1205,10 +1225,14 @@ async def search_entities(query: str, limit: int = 20) -> str:
     """
     try:
         from app.utils.graph_store import search_entities as _search
-        results = await asyncio.to_thread(_search, query, limit)
-        if not results:
+        results = await asyncio.to_thread(_search, query, limit * 3)
+        allowed = _mcp_get_allowed_memory_ids()
+        filtered = _filter_entities_by_allowed(results, allowed)[:limit]
+        for e in filtered:
+            e.pop("memory_ids", None)
+        if not filtered:
             return json.dumps({"entities": [], "message": "No matching entities found"})
-        return json.dumps({"entities": results}, indent=2)
+        return json.dumps({"entities": filtered}, indent=2)
     except Exception as e:
         logging.exception(e)
         return f"Error searching entities: {e}"
@@ -1222,8 +1246,12 @@ async def list_graph_entities(limit: int = 100) -> str:
     """
     try:
         from app.utils.graph_store import list_entities as _list
-        results = await asyncio.to_thread(_list, limit)
-        return json.dumps({"entities": results, "total": len(results)}, indent=2)
+        results = await asyncio.to_thread(_list, limit * 3)
+        allowed = _mcp_get_allowed_memory_ids()
+        filtered = _filter_entities_by_allowed(results, allowed)[:limit]
+        for e in filtered:
+            e.pop("memory_ids", None)
+        return json.dumps({"entities": filtered, "total": len(filtered)}, indent=2)
     except Exception as e:
         logging.exception(e)
         return f"Error listing entities: {e}"

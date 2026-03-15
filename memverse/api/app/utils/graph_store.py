@@ -176,7 +176,7 @@ def list_entities(limit: int = 100) -> List[dict]:
 
     try:
         rows = _query_rows(conn, f"MATCH (e:Entity) RETURN e.name, e.type, e.memory_ids LIMIT {limit}")
-        return [{"name": row[0], "type": row[1], "memory_count": len(row[2])} for row in rows]
+        return [{"name": row[0], "type": row[1], "memory_count": len(row[2]), "memory_ids": list(row[2])} for row in rows]
     except Exception as e:
         logger.error("Graph list failed: %s", e)
         return []
