@@ -1,13 +1,15 @@
 """
 Concierge MCP Server — wraps the Sanofi Concierge AI (Claude 4 Sonnet)
-with OAuth 2.1 authentication and SSE transport for Cursor IDE.
+with OAuth 2.1 authentication and SSE + Streamable HTTP transport for Cursor IDE.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import logging
 import os
+import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -15,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 
 from .auth import jwt_manager
 from .auth.cookie_store import cookie_store
@@ -130,14 +133,72 @@ async def set_token(request: Request):
     return {"ok": True, "user_id": "dev-user"}
 
 
-# ---------- SSE endpoints ----------
+# ---------- Streamable HTTP session management ----------
 
-@app.get(f"{_PREFIX}/sse")
-async def handle_sse(request: Request):
-    """Main SSE endpoint for MCP connections."""
+_streamable_sessions: dict[str, StreamableHTTPServerTransport] = {}
+_streamable_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _streamable_session_lifecycle(
+    transport: StreamableHTTPServerTransport,
+    uid: str,
+    ready: asyncio.Event,
+):
+    """Long-lived background task: keeps transport connected and MCP server running."""
+    user_id_var.set(uid)
+    try:
+        async with transport.connect() as (r, w):
+            ready.set()
+            await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
+    except asyncio.CancelledError:
+        pass
+    finally:
+        sid = transport.mcp_session_id
+        if sid:
+            _streamable_sessions.pop(sid, None)
+            _streamable_tasks.pop(sid, None)
+
+
+async def _run_streamable_session(request: Request, uid: str):
+    """Handle a single Streamable HTTP request, creating or reusing a persistent session."""
+    session_id = request.headers.get("mcp-session-id")
+
+    if session_id and session_id in _streamable_sessions:
+        transport = _streamable_sessions[session_id]
+        await transport.handle_request(request.scope, request.receive, request._send)
+        return
+
+    transport = StreamableHTTPServerTransport(mcp_session_id=str(uuid.uuid4()))
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        _streamable_session_lifecycle(transport, uid, ready)
+    )
+    await ready.wait()
+
+    sid = transport.mcp_session_id
+    if sid:
+        _streamable_sessions[sid] = transport
+        _streamable_tasks[sid] = task
+
+    await transport.handle_request(request.scope, request.receive, request._send)
+
+    if transport.mcp_session_id and transport.mcp_session_id not in _streamable_sessions:
+        _streamable_sessions[transport.mcp_session_id] = transport
+        _streamable_tasks[transport.mcp_session_id] = task
+
+
+# ---------- MCP endpoints (SSE + Streamable HTTP) ----------
+
+@app.api_route(f"{_PREFIX}/sse", methods=["GET", "POST", "DELETE"])
+async def handle_mcp(request: Request):
+    """Unified MCP endpoint: POST → Streamable HTTP, GET → SSE (legacy)."""
     uid = _authenticate_request(request)
-    token = user_id_var.set(uid)
 
+    if request.method == "POST":
+        await _run_streamable_session(request, uid)
+        return
+
+    token = user_id_var.set(uid)
     try:
         async with sse.connect_sse(
             request.scope,
@@ -155,6 +216,7 @@ async def handle_sse(request: Request):
 
 @app.post(f"{_PREFIX}/msg/")
 async def handle_post_message(request: Request):
+    """Legacy SSE message endpoint."""
     uid = _authenticate_request(request)
     token = user_id_var.set(uid)
 
