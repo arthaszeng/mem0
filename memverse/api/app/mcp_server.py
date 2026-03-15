@@ -36,6 +36,7 @@ from fastapi.routing import APIRouter
 from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import StreamableHTTPServerTransport
+from starlette.types import Send
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from sqlalchemy.orm import joinedload
 
@@ -1364,6 +1365,37 @@ def _read_gateway_user(request: Request) -> str:
 
 
 # ---------------------------------------------------------------------------
+# ASGI send guard — prevents "response already completed" RuntimeError
+# ---------------------------------------------------------------------------
+
+def _make_safe_send(original_send: Send) -> Send:
+    """Wrap ASGI send to silently drop messages after the response is complete.
+
+    MCP transports (SSE / Streamable HTTP) write a full HTTP response through
+    the raw ASGI ``send`` callable.  When the FastAPI route handler then returns
+    (with no explicit ``Response``), FastAPI tries to send *another*
+    ``http.response.start`` which triggers:
+
+        RuntimeError: Unexpected ASGI message 'http.response.start' sent,
+                      after response already completed.
+
+    This wrapper tracks the response lifecycle and drops any further messages
+    once the body has been fully sent (``more_body`` is False).
+    """
+    _completed = False
+
+    async def safe_send(message: dict) -> None:
+        nonlocal _completed
+        if _completed:
+            return
+        if message.get("type") == "http.response.body" and not message.get("more_body", False):
+            _completed = True
+        await original_send(message)
+
+    return safe_send  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
 # SSE transport (legacy) — kept for backward compatibility with older clients
 # ---------------------------------------------------------------------------
 
@@ -1372,8 +1404,9 @@ async def _run_sse_session(request: Request, uid: str, client_name: str, pslug: 
     user_token = user_id_var.set(uid)
     client_token = client_name_var.set(client_name)
     project_token = project_slug_var.set(pslug)
+    safe_send = _make_safe_send(request._send)
     try:
-        async with sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
+        async with sse.connect_sse(request.scope, request.receive, safe_send) as (r, w):
             await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
     finally:
         user_id_var.reset(user_token)
@@ -1410,11 +1443,12 @@ async def _streamable_session_lifecycle(
 
 async def _run_streamable_session(request: Request, uid: str, client_name: str, pslug: str = ""):
     """Handle a single Streamable HTTP request, creating or reusing a persistent session."""
+    safe_send = _make_safe_send(request._send)
     session_id = request.headers.get("mcp-session-id")
 
     if session_id and session_id in _streamable_sessions:
         transport = _streamable_sessions[session_id]
-        await transport.handle_request(request.scope, request.receive, request._send)
+        await transport.handle_request(request.scope, request.receive, safe_send)
         return
 
     transport = StreamableHTTPServerTransport(mcp_session_id=str(uuid.uuid4()))
@@ -1429,7 +1463,7 @@ async def _run_streamable_session(request: Request, uid: str, client_name: str, 
         _streamable_sessions[sid] = transport
         _streamable_tasks[sid] = task
 
-    await transport.handle_request(request.scope, request.receive, request._send)
+    await transport.handle_request(request.scope, request.receive, safe_send)
 
     if transport.mcp_session_id and transport.mcp_session_id not in _streamable_sessions:
         _streamable_sessions[transport.mcp_session_id] = transport
