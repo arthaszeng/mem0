@@ -961,20 +961,22 @@ async def import_backup(
 
 
 async def _backfill_entities_for_import(items: List[Dict[str, Any]]) -> None:
-    """Background: extract entities from imported memories after embedding."""
-    from app.utils.entity_extraction import extract_entities
+    """Background: batch-extract entities from imported memories."""
+    from app.utils.entity_extraction import extract_entities_batch
     from app.utils.graph_store import add_entities
 
     def _run():
+        batch_items = [(it["id"], it["content"]) for it in items]
+        results = extract_entities_batch(batch_items, batch_size=EMBED_BATCH_SIZE)
+
         count = 0
-        for item in items:
+        for mid, result in results.items():
             try:
-                result = extract_entities(item["content"])
                 if result.get("entities"):
-                    add_entities(result["entities"], result.get("relations", []), item["id"])
+                    add_entities(result["entities"], result.get("relations", []), mid)
                     count += 1
             except Exception as e:
-                logger.warning("Import entity extraction failed for %s: %s", item["id"], e)
+                logger.warning("Import entity storage failed for %s: %s", mid, e)
         logger.info("Import entity backfill: %d/%d memories produced entities", count, len(items))
 
     await asyncio.to_thread(_run)
