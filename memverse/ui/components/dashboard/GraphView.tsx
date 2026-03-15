@@ -141,13 +141,47 @@ export function GraphView() {
   }, [graphData]);
 
   const handleEngineStop = useCallback(() => {
-    if (graphRef.current && !fittedRef.current) {
-      fittedRef.current = true;
-      setTimeout(() => {
-        graphRef.current?.zoomToFit(600, 60);
-      }, 300);
-    }
-  }, []);
+    const fg = graphRef.current;
+    if (!fg || !graphData || fittedRef.current) return;
+    fittedRef.current = true;
+
+    setTimeout(() => {
+      if (!graphRef.current) return;
+      const nodes = graphData.nodes as GraphNode[];
+      const positioned = nodes.filter((n) => isFinite(n.x ?? NaN) && isFinite(n.y ?? NaN));
+      if (positioned.length < 2) {
+        graphRef.current.zoomToFit(600, 30);
+        return;
+      }
+
+      const xs = positioned.map((n) => n.x!);
+      const ys = positioned.map((n) => n.y!);
+      const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+      const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+      const stdX = Math.sqrt(xs.reduce((s, v) => s + (v - meanX) ** 2, 0) / xs.length) || 1;
+      const stdY = Math.sqrt(ys.reduce((s, v) => s + (v - meanY) ** 2, 0) / ys.length) || 1;
+
+      const inliers = positioned.filter((n) => {
+        return Math.abs(n.x! - meanX) <= stdX * 1.5 && Math.abs(n.y! - meanY) <= stdY * 1.5;
+      });
+      const group = inliers.length > 3 ? inliers : positioned;
+
+      const gxs = group.map((n) => n.x!);
+      const gys = group.map((n) => n.y!);
+      const cx = (Math.min(...gxs) + Math.max(...gxs)) / 2;
+      const cy = (Math.min(...gys) + Math.max(...gys)) / 2;
+      const bw = Math.max(...gxs) - Math.min(...gxs) + 80;
+      const bh = Math.max(...gys) - Math.min(...gys) + 80;
+
+      const el = containerRef.current;
+      const vw = el?.clientWidth || 900;
+      const vh = GRAPH_HEIGHT;
+      const zoom = Math.min(vw / bw, vh / bh, 4);
+
+      graphRef.current.centerAt(cx, cy, 800);
+      graphRef.current.zoom(zoom, 800);
+    }, 500);
+  }, [graphData]);
 
   const headerContent = (
     <div className="bg-zinc-800 border-b border-zinc-800 rounded-t-lg px-4 py-3 flex items-center justify-between">
