@@ -50,3 +50,32 @@ log_step()  { echo -e "\n\033[36m===> $*\033[0m"; }
 
 svc_name() { echo "${1%%:*}"; }
 svc_ctx()  { echo "${1##*:}"; }
+
+# Parse --service <name> from args; sets SVC_FILTER (empty = all services).
+# Call: parse_service_filter "$@"
+SVC_FILTER=""
+parse_service_filter() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -s|--service) SVC_FILTER="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+}
+
+# Return SERVICES entries matching SVC_FILTER (or all if empty).
+get_target_services() {
+  if [[ -z "$SVC_FILTER" ]]; then
+    echo "${SERVICES[@]}"
+    return
+  fi
+  for entry in "${SERVICES[@]}"; do
+    if [[ "$(svc_name "$entry")" == "$SVC_FILTER" ]]; then
+      echo "$entry"
+      return
+    fi
+  done
+  log_error "Unknown service: $SVC_FILTER"
+  log_info "Available: $(printf '%s ' "${SERVICES[@]}" | sed 's/:[^ ]*//g')"
+  exit 1
+}
