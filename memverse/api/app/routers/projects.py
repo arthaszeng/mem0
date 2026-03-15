@@ -223,6 +223,16 @@ def _cascade_delete_project(db: Session, project: Project) -> int:
         except Exception as e:
             logger.warning("Could not initialize memory client for cascade delete: %s", e)
 
+        try:
+            from app.utils.graph_store import remove_entities_for_memory
+            for mid in memory_ids:
+                try:
+                    remove_entities_for_memory(str(mid))
+                except Exception as e:
+                    logger.warning("Failed to remove entities for memory %s from Kuzu: %s", mid, e)
+        except ImportError:
+            pass
+
         db.execute(memory_categories.delete().where(memory_categories.c.memory_id.in_(memory_ids)))
         db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id.in_(memory_ids)).delete(synchronize_session=False)
         db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(memory_ids)).delete(synchronize_session=False)
@@ -607,6 +617,17 @@ def purge_user(
                         pass
         except Exception:
             pass
+
+        try:
+            from app.utils.graph_store import remove_entities_for_memory
+            for mid in orphan_ids:
+                try:
+                    remove_entities_for_memory(str(mid))
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+
         db.execute(memory_categories.delete().where(memory_categories.c.memory_id.in_(orphan_ids)))
         db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id.in_(orphan_ids)).delete(synchronize_session=False)
         db.query(MemoryStatusHistory).filter(MemoryStatusHistory.memory_id.in_(orphan_ids)).delete(synchronize_session=False)
