@@ -27,11 +27,7 @@
     gap: 10px;
     margin-bottom: 20px;
   }
-  .header h1 {
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
+  .header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
   .header .badge {
     font-size: 10px;
     padding: 2px 6px;
@@ -40,6 +36,63 @@
     color: var(--muted);
     font-weight: 500;
   }
+
+  /* Login form */
+  .login-card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .login-card h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  .form-group { margin-bottom: 10px; }
+  .form-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .form-group input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background: #0f1117;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+  }
+  .form-group input:focus { border-color: var(--accent); }
+
+  /* User bar */
+  .user-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--card);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+  }
+  .user-info { font-size: 13px; font-weight: 500; }
+  .user-info .label { color: var(--muted); font-weight: 400; }
+  .btn-signout {
+    background: transparent;
+    color: var(--red);
+    border: 1px solid #334155;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    width: auto;
+  }
+  .btn-signout:hover { background: #1e293b; }
+
+  /* Status card */
   .status-card {
     background: var(--card);
     border-radius: 10px;
@@ -52,13 +105,8 @@
     justify-content: space-between;
     padding: 6px 0;
   }
-  .status-row:not(:last-child) {
-    border-bottom: 1px solid #252830;
-  }
-  .status-label {
-    font-size: 13px;
-    color: var(--muted);
-  }
+  .status-row:not(:last-child) { border-bottom: 1px solid #252830; }
+  .status-label { font-size: 13px; color: var(--muted); }
   .status-value {
     display: flex;
     align-items: center;
@@ -66,23 +114,13 @@
     font-size: 13px;
     font-weight: 500;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .dot.ok { background: var(--green); }
   .dot.warn { background: var(--yellow); }
   .dot.error { background: var(--red); }
-  .dot.checking {
-    background: var(--muted);
-    animation: pulse 1s infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
+  .dot.checking { background: var(--muted); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
   .result {
     background: var(--card);
     border-radius: 10px;
@@ -97,6 +135,7 @@
   .result.fail { border-left: 3px solid var(--red); }
   .result strong { display: block; margin-bottom: 4px; }
   .result .detail { color: var(--muted); }
+
   button {
     width: 100%;
     padding: 10px;
@@ -107,33 +146,19 @@
     cursor: pointer;
     transition: all .15s ease;
   }
-  button:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-  .btn-primary {
-    background: var(--accent);
-    color: #fff;
-  }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; }
   .btn-primary:hover:not(:disabled) { opacity: 0.85; }
   .btn-primary:active:not(:disabled) { transform: scale(0.98); }
-  .btn-secondary {
-    background: transparent;
-    color: var(--accent);
-    border: 1px solid #334155;
-    margin-top: 8px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: #1e293b;
-  }
+
   .footer {
     text-align: center;
     margin-top: 12px;
     font-size: 11px;
     color: var(--muted);
   }
+
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -142,7 +167,28 @@
     <span class="badge">MCP</span>
   </div>
 
-  <div class="status-card">
+  <!-- Login form (shown when not authenticated) -->
+  <div id="loginCard" class="login-card">
+    <h2>Sign In</h2>
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password">
+    </div>
+    <button id="loginBtn" class="btn-primary" style="margin-top:4px">Sign In</button>
+  </div>
+
+  <!-- User bar (shown when authenticated) -->
+  <div id="userBar" class="user-bar hidden">
+    <span class="user-info"><span class="label">Signed in as </span><span id="displayName"></span></span>
+    <button id="signoutBtn" class="btn-signout">Sign Out</button>
+  </div>
+
+  <!-- Status card (shown when authenticated) -->
+  <div id="statusCard" class="status-card hidden">
     <div class="status-row">
       <span class="status-label">MCP Server</span>
       <span class="status-value">
@@ -171,7 +217,7 @@
     <span class="detail" id="resultDetail"></span>
   </div>
 
-  <button id="syncBtn" class="btn-primary" disabled>Sync Session</button>
+  <button id="syncBtn" class="btn-primary hidden" disabled>Sync Session</button>
 
   <div class="footer" id="footer"></div>
 

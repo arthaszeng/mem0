@@ -1,6 +1,9 @@
 """
 Concierge MCP Server — wraps the Sanofi Concierge AI (Claude 4 Sonnet)
-with OAuth 2.1 authentication and SSE + Streamable HTTP transport for Cursor IDE.
+with SSE + Streamable HTTP transport for Cursor IDE.
+
+Authentication is handled entirely by the nginx gateway (Auth Service),
+which injects X-Auth-Username into every request.
 """
 
 from __future__ import annotations
@@ -19,9 +22,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 
-from .auth import jwt_manager
 from .auth.cookie_store import cookie_store
-from .auth.oauth_endpoints import router as oauth_router
 from .client import ConciergeClient
 from .stream_parser import ConciergeStreamError
 
@@ -47,12 +48,12 @@ concierge = ConciergeClient(
 def _get_access_token() -> str:
     uid = user_id_var.get(None)
     if not uid:
-        raise ConciergeStreamError("Not authenticated — connect via OAuth first")
+        raise ConciergeStreamError("Not authenticated — no user context available")
     token = cookie_store.get(uid)
     if not token and _is_dev_mode():
         token = cookie_store.get_any()
     if not token:
-        raise ConciergeStreamError("Session expired — please re-authenticate")
+        raise ConciergeStreamError("No Concierge session — sync cookies via Chrome extension first")
     return token
 
 
@@ -93,30 +94,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount OAuth endpoints under prefix
-app.include_router(oauth_router, prefix=_PREFIX)
-
-
 @app.get(f"{_PREFIX}/health")
 async def health():
     return {"status": "ok", "service": "concierge-mcp", "version": _app_version}
 
 
-@app.get(f"{_PREFIX}/auth/extension-id")
-async def get_extension_id():
-    ext_id = os.getenv("CHROME_EXTENSION_ID", "")
-    return {"extension_id": ext_id}
-
-
 @app.get(f"{_PREFIX}/auth/status")
 async def auth_status(request: Request):
     """Check if a valid Concierge session is available for the current user."""
-    username = request.headers.get("X-Auth-Username")
-    if username:
-        token = cookie_store.get(username)
-        return {"connected": token is not None, "user": username}
-    token = cookie_store.get_any()
-    return {"connected": token is not None}
+    username = _get_username(request)
+    token = cookie_store.get(username)
+    return {"connected": token is not None, "user": username}
+
+
+@app.post(f"{_PREFIX}/auth/cookies")
+async def receive_cookies(request: Request):
+    """Receive Concierge cookies from the Chrome extension.
+
+    Requires gateway authentication — X-Auth-Username is injected by nginx.
+    """
+    username = _get_username(request)
+    body = await request.json()
+    access_token = body.get("access_token")
+    if not access_token:
+        return JSONResponse(status_code=400, content={"error": "Missing access_token"})
+    cookie_store.set(username, access_token)
+    logger.info("Concierge cookie synced for user=%s", username)
+    return {"ok": True, "user": username}
 
 
 @app.post(f"{_PREFIX}/auth/set-token")
@@ -192,7 +196,7 @@ async def _run_streamable_session(request: Request, uid: str):
 @app.api_route(f"{_PREFIX}/sse", methods=["GET", "POST", "DELETE"])
 async def handle_mcp(request: Request):
     """Unified MCP endpoint: POST → Streamable HTTP, GET → SSE (legacy)."""
-    uid = _authenticate_request(request)
+    uid = _get_username(request)
 
     if request.method == "POST":
         await _run_streamable_session(request, uid)
@@ -217,7 +221,7 @@ async def handle_mcp(request: Request):
 @app.post(f"{_PREFIX}/msg/")
 async def handle_post_message(request: Request):
     """Legacy SSE message endpoint."""
-    uid = _authenticate_request(request)
+    uid = _get_username(request)
     token = user_id_var.set(uid)
 
     try:
@@ -235,30 +239,18 @@ async def handle_post_message(request: Request):
         user_id_var.reset(token)
 
 
-_DEV_SECRETS = {"dev-secret-change-me", "change-me-to-a-random-secret"}
-
-
 def _is_dev_mode() -> bool:
-    if os.getenv("MCP_DEV_MODE", "").lower() in ("true", "1", "yes"):
-        return True
-    return os.getenv("JWT_SECRET", "dev-secret-change-me") in _DEV_SECRETS
+    return os.getenv("MCP_DEV_MODE", "").lower() in ("true", "1", "yes")
 
 
-def _authenticate_request(request: Request) -> str:
-    """Extract user_id from gateway headers (preferred) or Bearer token fallback."""
-    gateway_username = request.headers.get("X-Auth-Username")
-    if gateway_username:
-        return gateway_username
-
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        payload = jwt_manager.verify_access_token(token)
-        if payload and "sub" in payload:
-            return payload["sub"]
+def _get_username(request: Request) -> str:
+    """Extract username from gateway-injected header, or fallback to dev-user."""
+    username = request.headers.get("X-Auth-Username")
+    if username:
+        return username
     if _is_dev_mode():
         return "dev-user"
-    raise ConciergeStreamError("Invalid or missing authentication token")
+    raise ConciergeStreamError("Not authenticated — missing X-Auth-Username header")
 
 
 # ---------- REST API (for ChatGPT Actions / non-MCP clients) ----------
@@ -266,15 +258,16 @@ def _authenticate_request(request: Request) -> str:
 @app.post(f"{_PREFIX}/api/chat")
 async def api_chat(request: Request):
     """REST endpoint: chat with Concierge AI. Requires an active session (via Chrome extension)."""
+    username = _get_username(request)
     body = await request.json()
     message = body.get("message", "")
     thread_id = body.get("thread_id", "")
     if not message:
         return JSONResponse(status_code=400, content={"error": "Missing 'message' field"})
 
-    token = cookie_store.get_any()
+    token = cookie_store.get(username)
     if not token:
-        return JSONResponse(status_code=401, content={"error": "No active Concierge session. Authenticate via Chrome extension first."})
+        return JSONResponse(status_code=401, content={"error": "No active Concierge session. Sync cookies via Chrome extension first."})
 
     try:
         result = await concierge.chat(token, message, thread_id=thread_id or None)
@@ -286,14 +279,15 @@ async def api_chat(request: Request):
 @app.post(f"{_PREFIX}/api/search")
 async def api_search(request: Request):
     """REST endpoint: search Sanofi knowledge base via Concierge AI."""
+    username = _get_username(request)
     body = await request.json()
     query = body.get("query", "")
     if not query:
         return JSONResponse(status_code=400, content={"error": "Missing 'query' field"})
 
-    token = cookie_store.get_any()
+    token = cookie_store.get(username)
     if not token:
-        return JSONResponse(status_code=401, content={"error": "No active Concierge session. Authenticate via Chrome extension first."})
+        return JSONResponse(status_code=401, content={"error": "No active Concierge session. Sync cookies via Chrome extension first."})
 
     try:
         search_prompt = f"Search for: {query}\n\nPlease provide a concise summary of the most relevant results."
