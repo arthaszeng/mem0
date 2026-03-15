@@ -24,6 +24,12 @@ alwaysApply: false
 - **云服务器**: Intel Xeon x86_64/amd64 → `--cloud` 构建 amd64
 - **两端不能共用同一份镜像！**
 
+## 构建优化
+
+- 使用 `docker buildx build --load` 构建 amd64 镜像（利用 buildx 缓存）
+- **禁止加 `--pull` 参数**，避免每次构建都从 Docker Hub 拉取基础镜像
+- 基础镜像首次拉取后会被 buildx 缓存，后续构建自动复用
+
 ## 部署脚本 (`deploy/`)
 
 | 脚本 | 用途 | 在哪运行 |

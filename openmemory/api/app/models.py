@@ -266,21 +266,6 @@ class ArchivePolicy(Base):
     )
 
 
-class AgentInstruction(Base):
-    __tablename__ = "agent_instructions"
-    id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())
-    user_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
-    project_id = Column(UUIDString, ForeignKey("projects.id"), nullable=True, index=True)
-    agent_id = Column(String, nullable=False, index=True)
-    instructions = Column(String, nullable=False)
-    created_at = Column(DateTime, default=get_current_utc_time, index=True)
-    updated_at = Column(DateTime, default=get_current_utc_time, onupdate=get_current_utc_time)
-
-    __table_args__ = (
-        Index('idx_agent_instr_lookup', 'user_id', 'project_id', 'agent_id', unique=True),
-    )
-
-
 class MemoryStatusHistory(Base):
     __tablename__ = "memory_status_history"
     id = Column(UUIDString, primary_key=True, default=lambda: uuid.uuid4())

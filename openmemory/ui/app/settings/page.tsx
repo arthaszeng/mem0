@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShieldAlert, Users, FolderKanban, Settings, Key, Clock, Bot } from "lucide-react";
+import { ShieldAlert, Users, FolderKanban, Settings, Key, Clock } from "lucide-react";
 import { getCookie, TOKEN_COOKIE, decodeJwtPayload } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import { UsersTab } from "./components/UsersTab";
@@ -10,7 +10,6 @@ import { ProjectsTab } from "./components/ProjectsTab";
 import { ApiKeysTab } from "./components/ApiKeysTab";
 import { SystemSettingTab } from "./components/SystemSettingTab";
 import { ArchivePoliciesTab } from "./components/ArchivePoliciesTab";
-import { AgentInstructionsTab } from "./components/AgentInstructionsTab";
 
 export default function AdminSettingsPage() {
   const router = useRouter();
@@ -52,7 +51,7 @@ export default function AdminSettingsPage() {
         </div>
 
         <Tabs defaultValue="users" className="w-full animate-fade-slide-down delay-1">
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-8">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 mb-8">
             <TabsTrigger value="users" className="flex items-center gap-2">
               <Users className="h-4 w-4" /> Users
             </TabsTrigger>
@@ -64,9 +63,6 @@ export default function AdminSettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="policies" className="flex items-center gap-2">
               <Clock className="h-4 w-4" /> Policies
-            </TabsTrigger>
-            <TabsTrigger value="agents" className="flex items-center gap-2">
-              <Bot className="h-4 w-4" /> Agents
             </TabsTrigger>
             <TabsTrigger value="system" className="flex items-center gap-2">
               <Settings className="h-4 w-4" /> System Setting
@@ -84,9 +80,6 @@ export default function AdminSettingsPage() {
           </TabsContent>
           <TabsContent value="policies">
             <ArchivePoliciesTab />
-          </TabsContent>
-          <TabsContent value="agents">
-            <AgentInstructionsTab />
           </TabsContent>
           <TabsContent value="system">
             <SystemSettingTab />
