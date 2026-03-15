@@ -6,11 +6,13 @@ from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.database import Base, get_db
-from app.models import User, App
+from app.models import User, App, Project, ProjectMember, ProjectRole
 
 TEST_USER_ID = uuid.uuid4()
 TEST_APP_ID = uuid.uuid4()
+TEST_PROJECT_ID = uuid.uuid4()
 TEST_USERNAME = "test_user"
+TEST_PROJECT_SLUG = "test-user"
 
 _test_engine = create_engine(
     "sqlite:///:memory:",
@@ -42,6 +44,15 @@ def _ensure_seed():
         session.add(user)
         app = App(id=TEST_APP_ID, name="test_client", owner_id=TEST_USER_ID, is_active=True)
         session.add(app)
+        project = Project(
+            id=TEST_PROJECT_ID, name="Test User", slug=TEST_PROJECT_SLUG,
+            owner_id=TEST_USER_ID, is_default=True,
+        )
+        session.add(project)
+        member = ProjectMember(
+            project_id=TEST_PROJECT_ID, user_id=TEST_USER_ID, role=ProjectRole.owner,
+        )
+        session.add(member)
         session.commit()
         _seed_done = True
     except Exception:

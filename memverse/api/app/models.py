@@ -83,6 +83,7 @@ class Project(Base):
     slug = Column(String, unique=True, nullable=False, index=True)
     owner_id = Column(UUIDString, ForeignKey("users.id"), nullable=False, index=True)
     description = Column(String, nullable=True)
+    is_default = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=get_current_utc_time, index=True)
     updated_at = Column(DateTime, default=get_current_utc_time, onupdate=get_current_utc_time)
 

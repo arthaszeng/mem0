@@ -5,7 +5,7 @@
 import uuid
 import datetime
 
-from tests.conftest import TEST_USER_ID, TEST_APP_ID
+from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_PROJECT_ID
 
 
 class TestRunIdColumn:
@@ -13,7 +13,7 @@ class TestRunIdColumn:
         from app.models import Memory, MemoryState
         mid = uuid.uuid4()
         db_session.add(Memory(
-            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Test run scoped memory",
             state=MemoryState.active,
             run_id="run-001",
@@ -27,7 +27,7 @@ class TestRunIdColumn:
         from app.models import Memory, MemoryState
         mid = uuid.uuid4()
         db_session.add(Memory(
-            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Unscoped memory", state=MemoryState.active,
         ))
         db_session.commit()
@@ -39,7 +39,7 @@ class TestRunIdColumn:
         from app.models import Memory, MemoryState
         run = "session-abc"
         db_session.add(Memory(
-            id=uuid.uuid4(), user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=uuid.uuid4(), user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Session memory", state=MemoryState.active,
             run_id=run,
         ))

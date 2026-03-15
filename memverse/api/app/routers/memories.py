@@ -19,7 +19,12 @@ from app.models import (
     User,
 )
 from app.schemas import MemoryResponse
-from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user, resolve_project
+from app.utils.gateway_auth import (
+    AuthenticatedUser,
+    check_memory_project_access,
+    get_authenticated_user,
+    resolve_project_required,
+)
 from app.utils.memory import get_memory_client
 from app.utils.permissions import check_memory_access_permissions
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -141,15 +146,13 @@ async def search_memories_semantic(
     db: Session = Depends(get_db),
 ):
     """Semantic vector search over memories using the configured embedder + Qdrant."""
-    pctx = resolve_project(auth, db, request.project_slug)
+    pctx = resolve_project_required(auth, db, request.project_slug)
 
     memory_client = get_memory_client()
     if not memory_client:
         raise HTTPException(status_code=503, detail="Memory client unavailable")
 
-    qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=auth.username))]
-    if pctx:
-        qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=str(pctx.project_id))))
+    qdrant_filters = [FieldCondition(key="project_id", match=MatchValue(value=str(pctx.project_id)))]
     query_filter = Filter(must=qdrant_filters)
 
     def _do_search():
@@ -182,18 +185,14 @@ async def search_memories_semantic(
             },
         })
 
-    user = auth.db_user
     matched_domain = match_domain_by_keywords(request.query)
     if matched_domain:
         seen_ids = {r["id"] for r in results}
         domain_filters = [
             Memory.state == MemoryState.active,
             Memory.metadata_.op("->>")("domain") == matched_domain,
+            Memory.project_id == pctx.project_id,
         ]
-        if pctx:
-            domain_filters.append(Memory.project_id == pctx.project_id)
-        else:
-            domain_filters.append(Memory.user_id == user.id)
         domain_q = db.query(Memory).filter(*domain_filters)
         domain_memories = domain_q.limit(request.limit).all()
         for dm in domain_memories:
@@ -251,17 +250,13 @@ async def list_memories(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db)
 ):
-    pctx = resolve_project(auth, db, project_slug)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, project_slug)
 
     base_filters = [
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
+        Memory.project_id == pctx.project_id,
     ]
-    if pctx:
-        base_filters.append(Memory.project_id == pctx.project_id)
-    else:
-        base_filters.append(Memory.user_id == user.id)
 
     if search_query:
         matched_domain = match_domain_by_keywords(search_query)
@@ -339,14 +334,13 @@ async def get_categories(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, project_slug)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, project_slug)
 
-    q = db.query(Memory).filter(Memory.state != MemoryState.deleted, Memory.state != MemoryState.archived)
-    if pctx:
-        q = q.filter(Memory.project_id == pctx.project_id)
-    else:
-        q = q.filter(Memory.user_id == user.id)
+    q = db.query(Memory).filter(
+        Memory.state != MemoryState.deleted,
+        Memory.state != MemoryState.archived,
+        Memory.project_id == pctx.project_id,
+    )
     memories = q.all()
     categories = [category for memory in memories for category in memory.categories]
     unique_categories = list(set(categories))
@@ -364,18 +358,14 @@ async def get_domains(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, project_slug)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, project_slug)
 
     domain_filters = [
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
         Memory.metadata_.isnot(None),
+        Memory.project_id == pctx.project_id,
     ]
-    if pctx:
-        domain_filters.append(Memory.project_id == pctx.project_id)
-    else:
-        domain_filters.append(Memory.user_id == user.id)
     domain_q = db.query(func.json_extract(Memory.metadata_, "$.domain")).filter(*domain_filters)
     results = domain_q.distinct().all()
     domains = sorted([r[0] for r in results if r[0]])
@@ -493,10 +483,12 @@ class RegisterMemoryRequest(BaseModel):
     user_id: Optional[str] = None
     app: str = "openclaw"
     metadata: dict = {}
+    project_slug: Optional[str] = None
 
 
 class RegisterBatchRequest(BaseModel):
     memories: List[RegisterMemoryRequest]
+    project_slug: Optional[str] = None
 
 
 @router.post("/register")
@@ -512,6 +504,7 @@ async def register_external_memory(
     from app.models import categorize_memory_background
 
     user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
 
     app_obj = db.query(App).filter(App.name == request.app, App.owner_id == user.id).first()
     if not app_obj:
@@ -523,10 +516,14 @@ async def register_external_memory(
     memory_id = UUID(request.memory_id)
     existing = db.query(Memory).filter(Memory.id == memory_id).first()
     if existing:
-        if existing.user_id != user.id and not auth.is_superadmin:
+        if existing.project_id:
+            check_memory_project_access(db, existing, auth)
+        elif existing.user_id != user.id and not auth.is_superadmin:
             raise HTTPException(403, f"No permission to update memory {memory_id}")
         existing.content = request.content
         existing.state = MemoryState.active
+        if not existing.project_id:
+            existing.project_id = pctx.project_id
         db.commit()
         return {"status": "updated", "id": str(memory_id)}
 
@@ -534,6 +531,7 @@ async def register_external_memory(
         id=memory_id,
         user_id=user.id,
         app_id=app_obj.id,
+        project_id=pctx.project_id,
         content=request.content,
         metadata_=request.metadata,
         state=MemoryState.active,
@@ -556,6 +554,7 @@ async def register_external_memories_batch(
     from app.models import categorize_memory_background
 
     user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
     results = []
     for item in request.memories:
         app_obj = db.query(App).filter(App.name == item.app, App.owner_id == user.id).first()
@@ -567,17 +566,26 @@ async def register_external_memories_batch(
         memory_id = UUID(item.memory_id)
         existing = db.query(Memory).filter(Memory.id == memory_id).first()
         if existing:
-            if existing.user_id != user.id and not auth.is_superadmin:
+            try:
+                if existing.project_id:
+                    check_memory_project_access(db, existing, auth)
+                elif existing.user_id != user.id and not auth.is_superadmin:
+                    results.append({"status": "forbidden", "id": str(memory_id)})
+                    continue
+            except HTTPException:
                 results.append({"status": "forbidden", "id": str(memory_id)})
                 continue
             existing.content = item.content
             existing.state = MemoryState.active
+            if not existing.project_id:
+                existing.project_id = pctx.project_id
             results.append({"status": "updated", "id": str(memory_id)})
         else:
             memory = Memory(
                 id=memory_id,
                 user_id=user.id,
                 app_id=app_obj.id,
+                project_id=pctx.project_id,
                 content=item.content,
                 metadata_=item.metadata,
                 state=MemoryState.active,
@@ -593,6 +601,7 @@ async def register_external_memories_batch(
 @router.post("/backfill-categories")
 async def backfill_categories(
     user_id: Optional[str] = None,
+    project_slug: Optional[str] = None,
     background_tasks: BackgroundTasks = None,
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
@@ -600,13 +609,13 @@ async def backfill_categories(
     """Trigger categorization for all memories that have no categories yet."""
     from app.models import categorize_memory_background
 
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, project_slug)
 
     uncategorized = (
         db.query(Memory)
         .outerjoin(Memory.categories)
         .filter(
-            Memory.user_id == user.id,
+            Memory.project_id == pctx.project_id,
             Memory.state == MemoryState.active,
             Category.id.is_(None),
         )
@@ -622,6 +631,7 @@ async def backfill_categories(
 @router.post("/backfill-entities")
 async def backfill_entities(
     limit: int = Query(0, ge=0, description="0 = all active memories"),
+    project_slug: Optional[str] = None,
     background_tasks: BackgroundTasks = None,
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
@@ -631,10 +641,10 @@ async def backfill_entities(
     from app.utils.entity_extraction import extract_entities
     from app.utils.graph_store import add_entities
 
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, project_slug)
     q = (
         db.query(Memory)
-        .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+        .filter(Memory.project_id == pctx.project_id, Memory.state == MemoryState.active)
         .order_by(Memory.updated_at.desc())
     )
     if limit > 0:
@@ -666,7 +676,7 @@ async def create_memory(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.read_write)
+    pctx = resolve_project_required(auth, db, request.project_slug, min_role=ProjectRole.read_write)
     user = auth.db_user
 
     app_obj = db.query(App).filter(App.name == request.app,
@@ -700,9 +710,8 @@ async def create_memory(
     qdrant_meta = {
         "source_app": "memverse",
         "mcp_client": request.app,
+        "project_id": str(pctx.project_id),
     }
-    if pctx:
-        qdrant_meta["project_id"] = str(pctx.project_id)
     if request.run_id:
         qdrant_meta["run_id"] = request.run_id
     if request.expires_at:
@@ -731,7 +740,7 @@ async def create_memory(
                     if existing_memory:
                         existing_memory.state = MemoryState.active
                         existing_memory.content = result['memory']
-                        if pctx and not existing_memory.project_id:
+                        if not existing_memory.project_id:
                             existing_memory.project_id = pctx.project_id
                         memory = existing_memory
                     else:
@@ -740,7 +749,7 @@ async def create_memory(
                             id=memory_id,
                             user_id=user.id,
                             app_id=app_obj.id,
-                            project_id=pctx.project_id if pctx else None,
+                            project_id=pctx.project_id,
                             content=result['memory'],
                             metadata_=request.metadata,
                             state=MemoryState.active,
@@ -791,14 +800,12 @@ async def get_memory_analytics(
     auth_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth_user, db, project_slug)
-    user = auth_user.db_user
+    pctx = resolve_project_required(auth_user, db, project_slug)
 
-    base_filters = [Memory.state != MemoryState.deleted]
-    if pctx:
-        base_filters.append(Memory.project_id == pctx.project_id)
-    else:
-        base_filters.append(Memory.user_id == user.id)
+    base_filters = [
+        Memory.state != MemoryState.deleted,
+        Memory.project_id == pctx.project_id,
+    ]
 
     end_date = datetime.now(UTC).date()
     start_date = end_date - timedelta(days=30)
@@ -859,17 +866,14 @@ async def get_memory_insights(
     auth_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth_user, db, project_slug)
+    pctx = resolve_project_required(auth_user, db, project_slug)
     user = auth_user.db_user
 
     base_filters = [
         Memory.state != MemoryState.deleted,
         Memory.state != MemoryState.archived,
+        Memory.project_id == pctx.project_id,
     ]
-    if pctx:
-        base_filters.append(Memory.project_id == pctx.project_id)
-    else:
-        base_filters.append(Memory.user_id == user.id)
 
     memories_q = (
         db.query(Memory)
@@ -904,7 +908,7 @@ async def get_memory_insights(
         categories_list, domains_list, total_memories=len(memories)
     )
 
-    cache_key = f"{user.id}:{pctx.project_id if pctx else ''}"
+    cache_key = f"{user.id}:{pctx.project_id}"
     user_profile = None
     now = datetime.now(UTC)
     cache_ttl = timedelta(hours=1)
@@ -936,8 +940,7 @@ async def get_memory(
     db: Session = Depends(get_db),
 ):
     memory = get_memory_or_404(db, memory_id)
-    if memory.user_id != auth.db_user.id and not auth.is_superadmin:
-        raise HTTPException(403, "Access denied")
+    check_memory_project_access(db, memory, auth)
     return {
         "id": memory.id,
         "text": memory.content,
@@ -963,8 +966,7 @@ async def delete_memories(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.read_write)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug, min_role=ProjectRole.read_write)
 
     # Get memory client to delete from vector store
     try:
@@ -985,10 +987,9 @@ async def delete_memories(
 
     for memory_id in request.memory_ids:
         memory = get_memory_or_404(db, memory_id)
-        if not auth.is_superadmin and memory.user_id != user.id:
-            raise HTTPException(403, f"No permission to delete memory {memory_id}")
-        if pctx and memory.project_id != pctx.project_id:
+        if memory.project_id != pctx.project_id:
             raise HTTPException(403, f"Memory {memory_id} does not belong to this project")
+        check_memory_project_access(db, memory, auth)
 
         try:
             memory_client.delete(str(memory_id))
@@ -1001,7 +1002,7 @@ async def delete_memories(
         except Exception as graph_error:
             logging.warning(f"Failed to remove entities for memory {memory_id}: {graph_error}")
 
-        update_memory_state(db, memory_id, MemoryState.deleted, user.id)
+        update_memory_state(db, memory_id, MemoryState.deleted, auth.db_user.id)
 
     return {"message": f"Successfully deleted {len(request.memory_ids)} memories"}
 
@@ -1017,16 +1018,14 @@ async def archive_memories(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, request.project_slug, min_role=ProjectRole.read_write)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug, min_role=ProjectRole.read_write)
 
     for memory_id in request.memory_ids:
         memory = get_memory_or_404(db, memory_id)
-        if not auth.is_superadmin and memory.user_id != user.id:
-            raise HTTPException(403, f"No permission to archive memory {memory_id}")
-        if pctx and memory.project_id != pctx.project_id:
+        if memory.project_id != pctx.project_id:
             raise HTTPException(403, f"Memory {memory_id} does not belong to this project")
-        update_memory_state(db, memory_id, MemoryState.archived, user.id)
+        check_memory_project_access(db, memory, auth)
+        update_memory_state(db, memory_id, MemoryState.archived, auth.db_user.id)
     return {"message": f"Successfully archived {len(request.memory_ids)} memories"}
 
 
@@ -1038,6 +1037,7 @@ class PauseMemoriesRequest(BaseModel):
     global_pause: bool = False
     state: Optional[MemoryState] = None
     user_id: Optional[str] = None
+    project_slug: Optional[str] = None
 
 # Pause access to memories
 @router.post("/actions/pause")
@@ -1053,37 +1053,34 @@ async def pause_memories(
     category_ids = request.category_ids
     state = request.state or MemoryState.paused
 
-    user = auth.db_user
-    user_id = user.id
-    
+    pctx = resolve_project_required(auth, db, request.project_slug)
+    user_id = auth.db_user.id
+
     if global_pause:
         q = db.query(Memory).filter(
             Memory.state != MemoryState.deleted,
             Memory.state != MemoryState.archived,
+            Memory.project_id == pctx.project_id,
         )
-        if not auth.is_superadmin:
-            q = q.filter(Memory.user_id == user.id)
         memories = q.all()
         for memory in memories:
             update_memory_state(db, memory.id, state, user_id)
         return {"message": "Successfully paused all memories"}
 
     if app_id:
-        # Pause all memories for an app
         memories = db.query(Memory).filter(
             Memory.app_id == app_id,
-            Memory.user_id == user.id,
+            Memory.project_id == pctx.project_id,
             Memory.state != MemoryState.deleted,
             Memory.state != MemoryState.archived
         ).all()
         for memory in memories:
             update_memory_state(db, memory.id, state, user_id)
         return {"message": f"Successfully paused all memories for app {app_id}"}
-    
+
     if all_for_app and memory_ids:
-        # Pause all memories for an app
         memories = db.query(Memory).filter(
-            Memory.user_id == user.id,
+            Memory.project_id == pctx.project_id,
             Memory.state != MemoryState.deleted,
             Memory.id.in_(memory_ids)
         ).all()
@@ -1094,8 +1091,7 @@ async def pause_memories(
     if memory_ids:
         for memory_id in memory_ids:
             memory = get_memory_or_404(db, memory_id)
-            if not auth.is_superadmin and memory.user_id != user.id:
-                raise HTTPException(403, f"No permission to pause memory {memory_id}")
+            check_memory_project_access(db, memory, auth)
             update_memory_state(db, memory_id, state, user_id)
         return {"message": f"Successfully paused {len(memory_ids)} memories"}
 
@@ -1104,9 +1100,8 @@ async def pause_memories(
             Category.id.in_(category_ids),
             Memory.state != MemoryState.deleted,
             Memory.state != MemoryState.archived,
+            Memory.project_id == pctx.project_id,
         )
-        if not auth.is_superadmin:
-            q = q.filter(Memory.user_id == user.id)
         memories = q.all()
         for memory in memories:
             update_memory_state(db, memory.id, state, user_id)
@@ -1125,8 +1120,7 @@ async def get_memory_access_log(
     db: Session = Depends(get_db),
 ):
     memory = get_memory_or_404(db, memory_id)
-    if not auth.is_superadmin and memory.user_id != auth.db_user.id:
-        raise HTTPException(403, "No permission to view access logs for this memory")
+    check_memory_project_access(db, memory, auth)
 
     query = db.query(MemoryAccessLog).filter(MemoryAccessLog.memory_id == memory_id)
     total = query.count()
@@ -1161,8 +1155,7 @@ async def update_memory(
     db: Session = Depends(get_db),
 ):
     memory = get_memory_or_404(db, memory_id)
-    if memory.user_id != auth.db_user.id and not auth.is_superadmin:
-        raise HTTPException(403, "Cannot update another user's memory")
+    check_memory_project_access(db, memory, auth)
     if not request.memory_content or not request.memory_content.strip():
         raise HTTPException(400, "Memory content must not be empty or whitespace-only")
     memory.content = request.memory_content
@@ -1200,16 +1193,12 @@ async def filter_memories(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, request.project_slug)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
 
     base_project_filters = [
         Memory.state != MemoryState.deleted,
+        Memory.project_id == pctx.project_id,
     ]
-    if pctx:
-        base_project_filters.append(Memory.project_id == pctx.project_id)
-    else:
-        base_project_filters.append(Memory.user_id == user.id)
 
     query = db.query(Memory).filter(*base_project_filters)
 
@@ -1318,8 +1307,7 @@ async def get_related_memories(
     user = auth.db_user
     
     memory = get_memory_or_404(db, memory_id)
-    if not auth.is_superadmin and memory.user_id != user.id:
-        raise HTTPException(403, "No permission to view related memories")
+    check_memory_project_access(db, memory, auth)
 
     category_ids = [category.id for category in memory.categories]
     
@@ -1329,11 +1317,8 @@ async def get_related_memories(
     related_filters = [
         Memory.id != memory_id,
         Memory.state != MemoryState.deleted,
+        Memory.project_id == memory.project_id,
     ]
-    if memory.project_id:
-        related_filters.append(Memory.project_id == memory.project_id)
-    else:
-        related_filters.append(Memory.user_id == user.id)
     query = db.query(Memory).distinct(Memory.id).filter(
         *related_filters
     ).join(Memory.categories).filter(
@@ -1385,15 +1370,16 @@ async def restore_memories(
     db: Session = Depends(get_db),
 ):
     """Restore archived memories back to active state."""
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
     restored = []
     for mid in request.memory_ids:
         memory = get_memory_or_404(db, mid)
-        if memory.user_id != user.id and not auth.is_superadmin:
-            raise HTTPException(403, f"No permission to restore memory {mid}")
+        if memory.project_id != pctx.project_id:
+            raise HTTPException(403, f"Memory {mid} does not belong to this project")
+        check_memory_project_access(db, memory, auth)
         if memory.state != MemoryState.archived:
             continue
-        update_memory_state(db, mid, MemoryState.active, user.id)
+        update_memory_state(db, mid, MemoryState.active, auth.db_user.id)
         restored.append(str(mid))
     return {"restored": restored, "count": len(restored)}
 
@@ -1411,14 +1397,12 @@ async def export_memories(
     db: Session = Depends(get_db),
 ):
     """Export memories, optionally filtered by category/type/agent, grouped by category."""
-    pctx = resolve_project(auth, db, request.project_slug)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
 
-    filters = [Memory.state == MemoryState.active]
-    if pctx:
-        filters.append(Memory.project_id == pctx.project_id)
-    else:
-        filters.append(Memory.user_id == user.id)
+    filters = [
+        Memory.state == MemoryState.active,
+        Memory.project_id == pctx.project_id,
+    ]
 
     query = db.query(Memory).filter(*filters).options(joinedload(Memory.categories))
 
@@ -1462,12 +1446,13 @@ async def consolidate_memories_endpoint(
     db: Session = Depends(get_db),
 ):
     """Consolidate (merge) similar memories into one using LLM."""
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
     memories_data = []
     for mid in request.memory_ids:
         mem = get_memory_or_404(db, mid)
-        if mem.user_id != user.id and not auth.is_superadmin:
-            raise HTTPException(403, f"No permission to consolidate memory {mid}")
+        if mem.project_id != pctx.project_id:
+            raise HTTPException(403, f"Memory {mid} does not belong to this project")
+        check_memory_project_access(db, mem, auth)
         memories_data.append({"id": str(mid), "content": mem.content})
 
     from app.utils.intelligence import consolidate_memories as _consolidate
@@ -1486,7 +1471,7 @@ async def consolidate_memories_endpoint(
         first_mem = db.query(Memory).filter(Memory.id == request.memory_ids[0]).first()
         first_mem.content = consolidated_text
         for mid in request.memory_ids[1:]:
-            update_memory_state(db, mid, MemoryState.archived, user.id)
+            update_memory_state(db, mid, MemoryState.archived, auth.db_user.id)
         db.commit()
         result["kept_memory_id"] = str(request.memory_ids[0])
 
@@ -1506,14 +1491,12 @@ async def check_contradiction_endpoint(
     db: Session = Depends(get_db),
 ):
     """Check if a new memory text contradicts any existing memories."""
-    pctx = resolve_project(auth, db, request.project_slug)
-    user = auth.db_user
+    pctx = resolve_project_required(auth, db, request.project_slug)
 
-    filters = [Memory.state == MemoryState.active]
-    if pctx:
-        filters.append(Memory.project_id == pctx.project_id)
-    else:
-        filters.append(Memory.user_id == user.id)
+    filters = [
+        Memory.state == MemoryState.active,
+        Memory.project_id == pctx.project_id,
+    ]
 
     existing = db.query(Memory).filter(*filters).order_by(Memory.created_at.desc()).limit(request.limit).all()
     existing_data = [{"id": str(m.id), "content": m.content} for m in existing]
@@ -1533,17 +1516,10 @@ def _get_accessible_memory_ids(
 ) -> set[str]:
     """Return the set of memory_id strings the current user may see.
 
-    If *project_slug* is given, scope to that project; otherwise scope to all
-    active memories owned by the user.
+    If *project_slug* is given, scope to that project; otherwise use default project.
     """
-    if project_slug:
-        pctx = resolve_project(auth, db, project_slug)
-        if pctx:
-            filters = [Memory.state == MemoryState.active, Memory.project_id == pctx.project_id]
-        else:
-            filters = [Memory.state == MemoryState.active, Memory.user_id == auth.db_user.id]
-    else:
-        filters = [Memory.state == MemoryState.active, Memory.user_id == auth.db_user.id]
+    pctx = resolve_project_required(auth, db, project_slug)
+    filters = [Memory.state == MemoryState.active, Memory.project_id == pctx.project_id]
     return {str(r[0]) for r in db.query(Memory.id).filter(*filters).all()}
 
 

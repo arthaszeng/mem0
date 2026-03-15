@@ -22,7 +22,7 @@ from app.models import (
 )
 from app.utils.memory import get_memory_client
 from app.utils.gateway_auth import (
-    AuthenticatedUser, get_authenticated_user, resolve_project, ProjectRole,
+    AuthenticatedUser, get_authenticated_user, resolve_project, resolve_project_required, ProjectRole,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,14 +228,17 @@ async def clear_user_data(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    """Delete ALL memory data for the current user (SQLite + Qdrant).
+    """Delete ALL memory data for the current user's project (SQLite + Qdrant).
     Preserves user, project, and app records. Superadmin only."""
     if not auth.is_superadmin:
         raise HTTPException(403, "Superadmin required")
 
     user = auth.db_user
+    pctx = resolve_project_required(auth, db, None)
+    project_id = pctx.project_id
+
     memory_ids = [
-        mid for (mid,) in db.query(Memory.id).filter(Memory.user_id == user.id).all()
+        mid for (mid,) in db.query(Memory.id).filter(Memory.project_id == project_id).all()
     ]
 
     if memory_ids:
@@ -259,7 +262,7 @@ async def clear_user_data(
                 points, next_offset = vs.client.scroll(
                     collection_name=collection,
                     scroll_filter=Filter(must=[
-                        FieldCondition(key="user_id", match=MatchValue(value=user.user_id)),
+                        FieldCondition(key="project_id", match=MatchValue(value=str(project_id))),
                     ]),
                     limit=100,
                     offset=offset,
@@ -306,6 +309,9 @@ async def reembed_missing_vectors(
         raise HTTPException(403, "Superadmin required")
 
     user = auth.db_user
+    pctx = resolve_project_required(auth, db, None)
+    project_id = pctx.project_id
+
     memory_client = get_memory_client()
     if not memory_client or not hasattr(memory_client, "embedding_model"):
         raise HTTPException(503, "Memory client or embedding model unavailable")
@@ -317,7 +323,7 @@ async def reembed_missing_vectors(
     all_memories = (
         db.query(Memory)
         .options(joinedload(Memory.app))
-        .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+        .filter(Memory.project_id == project_id, Memory.state == MemoryState.active)
         .all()
     )
     sqlite_ids = {str(m.id) for m in all_memories}
@@ -329,7 +335,7 @@ async def reembed_missing_vectors(
         points, next_offset = vs.client.scroll(
             collection_name=vs.collection_name,
             scroll_filter=Filter(must=[
-                FieldCondition(key="user_id", match=MatchValue(value=user.user_id)),
+                FieldCondition(key="project_id", match=MatchValue(value=str(project_id))),
             ]),
             limit=100, offset=offset, with_payload=False, with_vectors=False,
         )
@@ -421,6 +427,7 @@ def _export_sqlite(
     if req.to_date:
         time_filters.append(Memory.created_at <= datetime.fromtimestamp(req.to_date, tz=UTC))
 
+    project_filter = Memory.project_id == project.id if project else Memory.user_id == user.id
     mem_q = (
         db.query(Memory)
         .options(
@@ -430,10 +437,9 @@ def _export_sqlite(
             joinedload(Memory.user),
         )
         .filter(
-            Memory.user_id == user.id,
+            project_filter,
             *(time_filters or []),
             *([Memory.app_id == req.app_id] if req.app_id else []),
-            *([Memory.project_id == project.id] if project else []),
         )
     )
 
@@ -530,11 +536,11 @@ def _export_logical_memories_gz(
     if to_date:
         time_filters.append(Memory.created_at <= datetime.fromtimestamp(to_date, tz=UTC))
 
+    project_filter = Memory.project_id == project.id if project else Memory.user_id == user.id
     q = (
         db.query(Memory)
         .options(joinedload(Memory.categories), joinedload(Memory.app), joinedload(Memory.project))
-        .filter(Memory.user_id == user.id, *(time_filters or []),
-                *([Memory.project_id == project.id] if project else []))
+        .filter(project_filter, *(time_filters or []))
     )
     if app_id:
         q = q.filter(Memory.app_id == app_id)
@@ -561,10 +567,8 @@ async def export_backup(
     db: Session = Depends(get_db),
 ):
     user = auth.db_user
-    project = None
-    if req.project_slug:
-        pctx = resolve_project(auth, db, req.project_slug)
-        project = pctx.project if pctx else None
+    pctx = resolve_project_required(auth, db, req.project_slug)
+    project = pctx.project
 
     sqlite_payload = _export_sqlite(db=db, user=user, req=req, project=project)
     memories_blob = _export_logical_memories_gz(
@@ -771,7 +775,8 @@ async def import_backup(
                 incoming_id = uuid4()
             existing = db.query(Memory).filter(Memory.id == incoming_id).first()
 
-            if is_cross_user or (existing and existing.user_id != user.id):
+            existing_in_project = existing and existing.project_id == target_project.id
+            if is_cross_user or (existing and not existing_in_project):
                 target_id = uuid4()
             else:
                 target_id = incoming_id
@@ -795,7 +800,7 @@ async def import_backup(
                 skipped_count += 1
                 continue
 
-            if existing and (existing.user_id == user.id) and mode == "skip":
+            if existing_in_project and mode == "skip":
                 skipped_count += 1
                 continue
 
@@ -806,7 +811,7 @@ async def import_backup(
 
             metadata = m.get("metadata") or {}
 
-            if existing and (existing.user_id == user.id) and mode == "overwrite":
+            if existing_in_project and mode == "overwrite":
                 existing.app_id = app_obj.id
                 existing.project_id = mem_project.id
                 existing.content = content

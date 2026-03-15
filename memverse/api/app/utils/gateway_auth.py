@@ -14,7 +14,7 @@ from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import App, Project, ProjectMember, ProjectRole, User
+from app.models import App, Memory, Project, ProjectMember, ProjectRole, User
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ def _ensure_default_project(db: Session, db_user: "User") -> None:
         slug=slug,
         owner_id=db_user.id,
         description="Auto-created personal project",
+        is_default=True,
     )
     db.add(project)
     db.flush()
@@ -172,3 +173,59 @@ def resolve_project(
         raise HTTPException(403, f"Requires at least '{min_role.value}' role on project")
 
     return ProjectContext(project, member.role)
+
+
+def resolve_project_required(
+    auth: AuthenticatedUser,
+    db: Session,
+    project_slug: Optional[str],
+    min_role: ProjectRole = ProjectRole.read_only,
+) -> ProjectContext:
+    """Resolve project from slug; if None, use the user's default project.
+    Always returns a valid ProjectContext."""
+    if project_slug:
+        return resolve_project(auth, db, project_slug, min_role)  # type: ignore[return-value]
+
+    # Use default project (slug matches user_id, or is_default)
+    from app.routers.projects import RESERVED_SLUGS
+
+    base_slug = _slugify(auth.db_user.user_id)
+    if base_slug in RESERVED_SLUGS:
+        base_slug = f"user-{base_slug}"
+    project = (
+        db.query(Project)
+        .filter(Project.owner_id == auth.db_user.id, Project.is_default == True)
+        .first()
+    )
+    if not project:
+        project = db.query(Project).filter(Project.slug == base_slug).first()
+    if not project:
+        raise HTTPException(404, "Default project not found; ensure user is provisioned")
+
+    if auth.is_superadmin:
+        return ProjectContext(project, ProjectRole.owner)
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == auth.db_user.id,
+    ).first()
+    if not member:
+        raise HTTPException(403, "Not a member of default project")
+    if ROLE_LEVEL.get(member.role, 0) < ROLE_LEVEL.get(min_role, 0):
+        raise HTTPException(403, f"Requires at least '{min_role.value}' role on project")
+    return ProjectContext(project, member.role)
+
+
+def check_memory_project_access(db: Session, memory: Memory, auth: AuthenticatedUser) -> bool:
+    """Check if the current user has access to the memory via project membership.
+    Returns True if allowed, raises HTTPException if not."""
+    if not memory.project_id:
+        raise HTTPException(404, "Memory has no project")
+    if auth.is_superadmin:
+        return True
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == memory.project_id,
+        ProjectMember.user_id == auth.db_user.id,
+    ).first()
+    if not member:
+        raise HTTPException(403, "Not a member of this memory's project")
+    return True

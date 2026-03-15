@@ -6,7 +6,7 @@
 import uuid
 import datetime
 
-from tests.conftest import TEST_USER_ID, TEST_APP_ID
+from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_PROJECT_ID
 
 
 class TestUpdateMemory:
@@ -14,7 +14,7 @@ class TestUpdateMemory:
         from app.models import Memory, MemoryState
         mid = uuid.uuid4()
         db_session.add(Memory(
-            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Original content", state=MemoryState.active,
         ))
         db_session.commit()
@@ -33,7 +33,7 @@ class TestArchiveRestore:
         from app.models import Memory, MemoryState
         mid = uuid.uuid4()
         db_session.add(Memory(
-            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Archivable memory", state=MemoryState.active,
         ))
         db_session.commit()
@@ -62,7 +62,7 @@ class TestExportMemories:
         mid = uuid.uuid4()
         cat = db_session.query(Category).first()
         mem = Memory(
-            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Exportable memory", state=MemoryState.active,
         )
         if cat:

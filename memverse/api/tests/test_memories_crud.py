@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, UTC
 
-from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_USERNAME
+from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_PROJECT_ID, TEST_USERNAME
 
 
 def _create_test_memory(db_session, content="Test memory content"):
@@ -12,6 +12,7 @@ def _create_test_memory(db_session, content="Test memory content"):
         id=memory_id,
         user_id=TEST_USER_ID,
         app_id=TEST_APP_ID,
+        project_id=TEST_PROJECT_ID,
         content=content,
         state=MemoryState.active,
         created_at=datetime.now(UTC),

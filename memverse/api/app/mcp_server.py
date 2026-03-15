@@ -133,9 +133,7 @@ async def _memory_write_worker():
 
             effective_instructions = task_instructions or ""
 
-            qdrant_meta = {"source_app": "memverse", "mcp_client": client_name}
-            if project_id:
-                qdrant_meta["project_id"] = project_id
+            qdrant_meta = {"source_app": "memverse", "mcp_client": client_name, "project_id": project_id}
 
             saved_prompt = None
             if effective_instructions:
@@ -184,7 +182,7 @@ async def _memory_write_worker():
                             else:
                                 memory.state = MemoryState.active
                                 memory.content = result["memory"]
-                                if project_id and not memory.project_id:
+                                if not memory.project_id:
                                     memory.project_id = project_id
 
                             if parsed_expires:
@@ -204,7 +202,7 @@ async def _memory_write_worker():
                             if memory:
                                 memory.content = result["memory"]
                                 memory.updated_at = datetime.datetime.now(datetime.UTC)
-                                if project_id and not memory.project_id:
+                                if not memory.project_id:
                                     memory.project_id = project_id
                             else:
                                 memory = Memory(
@@ -285,8 +283,9 @@ def _get_user_default_project(db, user_id: int) -> "tuple[str | None, str | None
     return str(project.id), project.slug
 
 
-def _resolve_project(db, user_id: int) -> "tuple[str | None, str | None]":
-    """Resolve project from context var or fall back to user's default project."""
+def _resolve_project(db, user_id: int) -> "tuple[str, str]":
+    """Resolve project from context var or fall back to user's default project.
+    Always returns a valid (project_id, slug). Raises ValueError if none found."""
     from app.models import Project, ProjectMember
     slug = project_slug_var.get("")
     if slug:
@@ -299,7 +298,10 @@ def _resolve_project(db, user_id: int) -> "tuple[str | None, str | None]":
             if member:
                 return str(project.id), project.slug
             logging.warning(f"User {user_id} not a member of project '{slug}', falling back to default")
-    return _get_user_default_project(db, user_id)
+    pid, pslug = _get_user_default_project(db, user_id)
+    if not pid:
+        raise ValueError(f"No project found for user {user_id}")
+    return pid, pslug
 
 # Create a router for MCP endpoints
 mcp_router = APIRouter(prefix="/memverse-mcp")
@@ -405,13 +407,11 @@ async def search_memory(
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
             project_id, _ = _resolve_project(db, user.id)
 
-            user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
-            accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
+            project_memories = db.query(Memory).filter(Memory.project_id == project_id).all()
+            accessible_memory_ids = [memory.id for memory in project_memories if check_memory_access_permissions(db, memory, app.id)]
 
             # --- Vector search ---
-            qdrant_filters = [FieldCondition(key="user_id", match=MatchValue(value=uid))]
-            if project_id:
-                qdrant_filters.append(FieldCondition(key="project_id", match=MatchValue(value=project_id)))
+            qdrant_filters = [FieldCondition(key="project_id", match=MatchValue(value=project_id))]
             query_filter = Filter(must=qdrant_filters)
 
             def _do_search():
@@ -449,7 +449,7 @@ async def search_memory(
                 domain_memories = (
                     db.query(Memory)
                     .filter(
-                        Memory.user_id == user.id,
+                        Memory.project_id == project_id,
                         Memory.state == MemoryState.active,
                         Memory.metadata_.op("->>")("domain") == matched_domain,
                     )
@@ -474,21 +474,17 @@ async def search_memory(
                     })
 
             # --- Keyword search (SQLite LIKE) ---
-            kw_q = (
+            kw_memories = (
                 db.query(Memory)
                 .filter(
-                    Memory.user_id == user.id,
+                    Memory.project_id == project_id,
                     Memory.state == MemoryState.active,
                     Memory.content.ilike(f"%{query}%"),
                 )
+                .order_by(Memory.updated_at.desc())
+                .limit(effective_limit)
+                .all()
             )
-            if project_id:
-                try:
-                    pid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
-                except (ValueError, AttributeError):
-                    pid = project_id
-                kw_q = kw_q.filter(Memory.project_id == pid)
-            kw_memories = kw_q.order_by(Memory.updated_at.desc()).limit(effective_limit).all()
             for km in kw_memories:
                 mid = str(km.id)
                 if mid in seen_ids:
@@ -602,11 +598,8 @@ async def list_memories() -> str:
             memories = await asyncio.to_thread(memory_client.get_all, user_id=uid)
             filtered_memories = []
 
-            mem_q = db.query(Memory).filter(Memory.user_id == user.id)
-            if project_id:
-                mem_q = mem_q.filter(Memory.project_id == project_id)
-            user_memories = mem_q.all()
-            accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
+            project_memories = db.query(Memory).filter(Memory.project_id == project_id).all()
+            accessible_memory_ids = [memory.id for memory in project_memories if check_memory_access_permissions(db, memory, app.id)]
             if isinstance(memories, dict) and 'results' in memories:
                 for memory_data in memories['results']:
                     if 'id' in memory_data:
@@ -668,11 +661,12 @@ async def delete_memories(memory_ids: list[str]) -> str:
         try:
             # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
 
             # Convert string IDs to UUIDs and filter accessible ones
             requested_ids = [uuid.UUID(mid) for mid in memory_ids]
-            user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
-            accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
+            project_memories = db.query(Memory).filter(Memory.project_id == project_id).all()
+            accessible_memory_ids = [memory.id for memory in project_memories if check_memory_access_permissions(db, memory, app.id)]
 
             # Only delete memories that are both requested and accessible
             ids_to_delete = [mid for mid in requested_ids if mid in accessible_memory_ids]
@@ -743,9 +737,10 @@ async def delete_all_memories() -> str:
         try:
             # Get or create user and app
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
 
-            user_memories = db.query(Memory).filter(Memory.user_id == user.id).all()
-            accessible_memory_ids = [memory.id for memory in user_memories if check_memory_access_permissions(db, memory, app.id)]
+            project_memories = db.query(Memory).filter(Memory.project_id == project_id).all()
+            accessible_memory_ids = [memory.id for memory in project_memories if check_memory_access_permissions(db, memory, app.id)]
 
             for memory_id in accessible_memory_ids:
                 try:
@@ -865,13 +860,14 @@ async def archive_memories(memory_ids: list[str]) -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
             archived = 0
             for mid_str in memory_ids:
                 try:
                     mid = uuid.UUID(mid_str)
                 except ValueError:
                     continue
-                mem = db.query(Memory).filter(Memory.id == mid, Memory.user_id == user.id).first()
+                mem = db.query(Memory).filter(Memory.id == mid, Memory.project_id == project_id).first()
                 if mem and mem.state == MemoryState.active:
                     mem.state = MemoryState.archived
                     mem.archived_at = datetime.datetime.now(datetime.UTC)
@@ -906,13 +902,14 @@ async def restore_memories(memory_ids: list[str]) -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
             restored = 0
             for mid_str in memory_ids:
                 try:
                     mid = uuid.UUID(mid_str)
                 except ValueError:
                     continue
-                mem = db.query(Memory).filter(Memory.id == mid, Memory.user_id == user.id).first()
+                mem = db.query(Memory).filter(Memory.id == mid, Memory.project_id == project_id).first()
                 if mem and mem.state == MemoryState.archived:
                     mem.state = MemoryState.active
                     mem.archived_at = None
@@ -1030,9 +1027,10 @@ async def consolidate_memories(dry_run: bool = True) -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
             memories = (
                 db.query(Memory)
-                .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+                .filter(Memory.project_id == project_id, Memory.state == MemoryState.active)
                 .order_by(Memory.updated_at.desc())
                 .limit(200)
                 .all()
@@ -1113,9 +1111,10 @@ async def check_contradiction(text: str) -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
             recent = (
                 db.query(Memory)
-                .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+                .filter(Memory.project_id == project_id, Memory.state == MemoryState.active)
                 .order_by(Memory.updated_at.desc())
                 .limit(50)
                 .all()
@@ -1149,9 +1148,10 @@ async def export_memories(format: str = "json") -> str:
         db = SessionLocal()
         try:
             user, app = get_user_and_app(db, user_id=uid, app_id=client_name)
+            project_id, _ = _resolve_project(db, user.id)
             memories = (
                 db.query(Memory)
-                .filter(Memory.user_id == user.id, Memory.state == MemoryState.active)
+                .filter(Memory.project_id == project_id, Memory.state == MemoryState.active)
                 .order_by(Memory.updated_at.desc())
                 .limit(500)
                 .all()
@@ -1198,14 +1198,15 @@ async def export_memories(format: str = "json") -> str:
 
 
 def _mcp_get_allowed_memory_ids() -> set[str]:
-    """Return memory IDs accessible to the current MCP user."""
+    """Return memory IDs accessible to the current MCP user (scoped by project)."""
     uid = user_id_var.get(None)
     if not uid:
         return set()
     db = SessionLocal()
     try:
         user, _ = get_user_and_app(db, user_id=uid, app_id=client_name_var.get("unknown"))
-        rows = db.query(Memory.id).filter(Memory.user_id == user.id, Memory.state == MemoryState.active).all()
+        project_id, _ = _resolve_project(db, user.id)
+        rows = db.query(Memory.id).filter(Memory.project_id == project_id, Memory.state == MemoryState.active).all()
         return {str(r[0]) for r in rows}
     except Exception:
         return set()
@@ -1280,11 +1281,8 @@ async def get_insights(refresh: bool = False) -> str:
             base_filters = [
                 Memory.state != MemoryState.deleted,
                 Memory.state != MemoryState.archived,
+                Memory.project_id == project_id,
             ]
-            if project_id:
-                base_filters.append(Memory.project_id == uuid.UUID(project_id))
-            else:
-                base_filters.append(Memory.user_id == user.id)
 
             memories = (
                 db.query(Memory)
@@ -1540,7 +1538,7 @@ def setup_mcp_server(app: FastAPI):
     mcp._mcp_server.name = "memverse-mcp-server"
 
     from app.mcp_prompts import register_prompts
-    register_prompts(mcp, user_id_var, client_name_var)
+    register_prompts(mcp, user_id_var, client_name_var, project_slug_var)
 
     @app.on_event("startup")
     async def _start_memory_worker():

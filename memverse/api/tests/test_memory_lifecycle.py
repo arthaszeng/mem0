@@ -5,7 +5,7 @@
 import uuid
 import datetime
 
-from tests.conftest import TEST_USER_ID, TEST_APP_ID
+from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_PROJECT_ID
 
 
 class TestExpiredState:
@@ -22,6 +22,7 @@ class TestExpiresAtColumn:
             id=uuid.uuid4(),
             user_id=TEST_USER_ID,
             app_id=TEST_APP_ID,
+            project_id=TEST_PROJECT_ID,
             content="Session memory with TTL",
             state=MemoryState.active,
             expires_at=expires,
@@ -37,6 +38,7 @@ class TestExpiresAtColumn:
             id=uuid.uuid4(),
             user_id=TEST_USER_ID,
             app_id=TEST_APP_ID,
+            project_id=TEST_PROJECT_ID,
             content="Permanent memory",
             state=MemoryState.active,
         )
@@ -58,11 +60,11 @@ class TestTTLCleanup:
         fresh_id = uuid.uuid4()
 
         db_session.add(Memory(
-            id=stale_id, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=stale_id, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Should expire", state=MemoryState.active, expires_at=past,
         ))
         db_session.add(Memory(
-            id=fresh_id, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=fresh_id, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Should stay", state=MemoryState.active, expires_at=future,
         ))
         db_session.commit()

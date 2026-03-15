@@ -27,11 +27,11 @@ def _get_memory_client_safe():
         return None
 
 
-def _search_memories_sync(client, query: str, user_id: str, limit: int = 50):
+def _search_memories_sync(client, query: str, project_id: str, limit: int = 50):
     from qdrant_client.models import Filter, FieldCondition, MatchValue
 
     emb = client.embedding_model.embed(query, "search")
-    qf = Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))])
+    qf = Filter(must=[FieldCondition(key="project_id", match=MatchValue(value=project_id))])
     return client.vector_store.client.query_points(
         collection_name=client.vector_store.collection_name,
         query=emb,
@@ -55,8 +55,28 @@ def _format_memory_list(memories: list[dict], heading: str = "Memories") -> str:
     return "\n".join(lines)
 
 
-def register_prompts(mcp, user_id_var, client_name_var):
+def register_prompts(mcp, user_id_var, client_name_var, project_slug_var=None):
     """Register all MCP prompts on the given FastMCP instance."""
+
+    def _resolve_prompt_project(db, user):
+        """Resolve project for prompt context using the same logic as MCP tools."""
+        from app.models import Project, ProjectMember
+        slug = project_slug_var.get("") if project_slug_var else ""
+        if slug:
+            project = db.query(Project).filter(Project.slug == slug).first()
+            if project:
+                member = db.query(ProjectMember).filter(
+                    ProjectMember.project_id == project.id,
+                    ProjectMember.user_id == user.id,
+                ).first()
+                if member:
+                    return str(project.id)
+        member = db.query(ProjectMember).filter(ProjectMember.user_id == user.id).first()
+        if member:
+            project = db.query(Project).filter(Project.id == member.project_id).first()
+            if project:
+                return str(project.id)
+        return None
 
     @mcp.prompt(
         name="recall",
@@ -69,7 +89,17 @@ def register_prompts(mcp, user_id_var, client_name_var):
         if not client:
             return "Memory system unavailable. Please try again later."
 
-        hits = await asyncio.to_thread(_search_memories_sync, client, topic, uid, 50)
+        db = SessionLocal()
+        try:
+            from app.utils.db import get_user_and_app
+            user, _ = get_user_and_app(db, user_id=uid, app_id="cursor")
+            project_id = _resolve_prompt_project(db, user)
+            if not project_id:
+                return "No project found for user."
+        finally:
+            db.close()
+
+        hits = await asyncio.to_thread(_search_memories_sync, client, topic, project_id, 50)
 
         results = []
         for h in hits:
@@ -98,12 +128,15 @@ def register_prompts(mcp, user_id_var, client_name_var):
         try:
             from app.utils.db import get_user_and_app
             user, _ = get_user_and_app(db, user_id=uid, app_id="cursor")
+            project_id = _resolve_prompt_project(db, user)
+            if not project_id:
+                return "No project found for user."
 
             cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=7)
             recent = (
                 db.query(Memory)
                 .filter(
-                    Memory.user_id == user.id,
+                    Memory.project_id == project_id,
                     Memory.state == MemoryState.active,
                     Memory.updated_at >= cutoff,
                 )
@@ -174,11 +207,14 @@ def register_prompts(mcp, user_id_var, client_name_var):
         try:
             from app.utils.db import get_user_and_app
             user, _ = get_user_and_app(db, user_id=uid, app_id="cursor")
+            project_id = _resolve_prompt_project(db, user)
+            if not project_id:
+                return "No project found for user."
 
             memories = (
                 db.query(Memory)
                 .filter(
-                    Memory.user_id == user.id,
+                    Memory.project_id == project_id,
                     Memory.state == MemoryState.active,
                 )
                 .order_by(Memory.updated_at.desc())
@@ -244,6 +280,16 @@ def register_prompts(mcp, user_id_var, client_name_var):
         if not client:
             return "Memory system unavailable."
 
+        db = SessionLocal()
+        try:
+            from app.utils.db import get_user_and_app
+            user, _ = get_user_and_app(db, user_id=uid, app_id="cursor")
+            project_id = _resolve_prompt_project(db, user)
+            if not project_id:
+                return "No project found for user."
+        finally:
+            db.close()
+
         queries = [
             "personal preferences habits hobbies",
             "technical stack tools programming languages",
@@ -258,7 +304,7 @@ def register_prompts(mcp, user_id_var, client_name_var):
 
         for query, label in zip(queries, all_results.keys()):
             hits = await asyncio.to_thread(
-                _search_memories_sync, client, query, uid, 30
+                _search_memories_sync, client, query, project_id, 30
             )
             for h in hits:
                 hid = str(h.id)
@@ -299,11 +345,14 @@ def register_prompts(mcp, user_id_var, client_name_var):
         try:
             from app.utils.db import get_user_and_app
             user, _ = get_user_and_app(db, user_id=uid, app_id="cursor")
+            project_id = _resolve_prompt_project(db, user)
+            if not project_id:
+                return "No project found for user."
 
             all_active = (
                 db.query(Memory)
                 .filter(
-                    Memory.user_id == user.id,
+                    Memory.project_id == project_id,
                     Memory.state == MemoryState.active,
                 )
                 .order_by(Memory.created_at.asc())

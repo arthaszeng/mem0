@@ -7,7 +7,7 @@ import uuid
 import datetime
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_USERNAME
+from tests.conftest import TEST_USER_ID, TEST_APP_ID, TEST_PROJECT_ID, TEST_USERNAME
 
 
 class TestSearchNewParams:
@@ -40,7 +40,7 @@ class TestKeywordSearch:
         from app.models import Memory, MemoryState
         mid = uuid.uuid4()
         db_session.add(Memory(
-            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID,
+            id=mid, user_id=TEST_USER_ID, app_id=TEST_APP_ID, project_id=TEST_PROJECT_ID,
             content="Qdrant is the vector database we chose for Memverse",
             state=MemoryState.active,
             created_at=datetime.datetime.now(datetime.UTC),

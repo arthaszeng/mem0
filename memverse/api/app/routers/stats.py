@@ -2,7 +2,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.models import App, Memory, MemoryState
-from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user, resolve_project
+from app.utils.gateway_auth import AuthenticatedUser, get_authenticated_user, resolve_project_required
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -16,14 +16,13 @@ async def get_profile(
     auth: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ):
-    pctx = resolve_project(auth, db, project_slug)
+    pctx = resolve_project_required(auth, db, project_slug)
     user = auth.db_user
 
-    mem_q = db.query(Memory).filter(Memory.state != MemoryState.deleted)
-    if pctx:
-        mem_q = mem_q.filter(Memory.project_id == pctx.project_id)
-    else:
-        mem_q = mem_q.filter(Memory.user_id == user.id)
+    mem_q = db.query(Memory).filter(
+        Memory.state != MemoryState.deleted,
+        Memory.project_id == pctx.project_id,
+    )
     total_memories = mem_q.count()
 
     apps = db.query(App).filter(App.owner_id == user.id)

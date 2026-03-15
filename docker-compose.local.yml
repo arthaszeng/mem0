@@ -19,7 +19,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION}
     image: memverse/auth-service:${APP_VERSION}
-    env_file: .env.local
+    env_file: .env
     volumes:
       - ./memverse/auth:/app
       - auth_data:/data
@@ -41,7 +41,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION}
     image: memverse/memverse-mcp:${APP_VERSION}
-    env_file: .env.local
+    env_file: .env
     depends_on:
       - memverse-store
     volumes:
@@ -59,7 +59,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION}
     image: memverse/memverse-ui:${APP_VERSION}
-    env_file: .env.local
+    env_file: .env
     depends_on:
       - memverse-mcp
     restart: unless-stopped
@@ -71,7 +71,7 @@ services:
       args:
         APP_VERSION: ${APP_VERSION}
     image: memverse/concierge-mcp:${APP_VERSION}
-    env_file: .env.local
+    env_file: .env
     restart: unless-stopped
 
 volumes:

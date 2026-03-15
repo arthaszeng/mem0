@@ -195,7 +195,9 @@ def delete_project(
     db: Session = Depends(get_db),
 ):
     project = _get_project_or_404(db, slug)
-    _require_project_access(db, project, auth, ProjectRole.admin)
+    if getattr(project, "is_default", False):
+        raise HTTPException(403, "Default project cannot be deleted")
+    _require_project_access(db, project, auth, ProjectRole.owner)
 
     deleted_count = _cascade_delete_project(db, project)
     return {
@@ -603,6 +605,8 @@ def purge_user(
         db.delete(m)
         stats["memberships_removed"] += 1
 
+    # Safety net: clean up any memories still owned by this user that were not
+    # covered by project cascade (e.g. legacy data with NULL project_id).
     orphan_memories = db.query(Memory).filter(Memory.user_id == target.id).all()
     orphan_ids = [m.id for m in orphan_memories]
     if orphan_ids:
