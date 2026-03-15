@@ -1,0 +1,22 @@
+---
+description: 保持 git 工作区干净
+alwaysApply: true
+---
+
+# Git 工作区必须保持干净
+
+## 铁律
+
+**每次完成一组逻辑相关的代码改动后，必须立即 commit。**
+
+- 不要等用户提醒才 commit
+- 不要积攒多个不相关的改动在一次 commit 中
+- 部署前必须确认 `git status` 是 clean 的
+- 部署后如果产生了新的改动（如 VERSION bump），也要 commit
+
+## 检查时机
+
+1. **执行完一个 todo item** → commit
+2. **部署到云端之前** → 确认已 commit
+3. **对话即将结束时** → 检查是否有未提交的改动
+4. **用户说"提交"或"commit"** → 立即执行
