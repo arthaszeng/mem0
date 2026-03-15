@@ -50,19 +50,6 @@ export function GraphView() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<ForceGraphMethods<any, any>>(undefined);
   const fittedRef = useRef(false);
-  const [dimensions, setDimensions] = useState({ width: 800, height: GRAPH_HEIGHT });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const { width } = entries[0].contentRect;
-      if (width > 0) setDimensions({ width, height: GRAPH_HEIGHT });
-    });
-    ro.observe(el);
-    setDimensions({ width: el.clientWidth || 800, height: GRAPH_HEIGHT });
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -213,12 +200,15 @@ export function GraphView() {
   return (
     <div className="bg-zinc-900 rounded-lg border border-zinc-800">
       {headerContent}
-      <div className="overflow-hidden" style={{ height: GRAPH_HEIGHT }} ref={containerRef}>
+      <div
+        ref={containerRef}
+        className="overflow-hidden [&>div]:!overflow-hidden [&_canvas]:!block"
+        style={{ height: GRAPH_HEIGHT, width: "100%" }}
+      >
         <ForceGraph2D
           ref={graphRef}
           graphData={graphData}
-          width={dimensions.width}
-          height={dimensions.height}
+          height={GRAPH_HEIGHT}
           nodeCanvasObject={nodeCanvasObject}
           nodeLabel=""
           linkLabel={(link: { relation?: string }) => link.relation ?? ""}
