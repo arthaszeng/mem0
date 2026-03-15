@@ -1,4 +1,4 @@
-# OpenMemory 多用户 + 认证网关 + 项目隔离方案
+# Memverse 多用户 + 认证网关 + 项目隔离方案
 
 ## 核心理念：认证与业务分离
 
@@ -33,8 +33,8 @@ graph TB
     end
 
     subgraph downstream ["Downstream Services -- read X-Auth-* only"]
-        OMAPI["OpenMemory API\n(port 8765)"]
-        OMMCP["OpenMemory MCP\n(port 8765)"]
+        OMAPI["Memverse API\n(port 8765)"]
+        OMMCP["Memverse MCP\n(port 8765)"]
         ConcMCP["Concierge MCP\n(port 8767)"]
         LangGraph["LangGraph Agent\n(port 8766)"]
         FutureService["Future Services\n(...)"]
@@ -81,12 +81,12 @@ sequenceDiagram
     participant A as Auth Service
     participant M as OpenMemory MCP
 
-    C->>N: GET /memory-mcp/cursor/sse (no token)
+    C->>N: GET /memverse-mcp/cursor/sse (no token)
     N->>A: auth_request /auth/verify
     A-->>N: 401 Unauthorized
     N-->>C: 401
 
-    C->>N: GET /memory-mcp/.well-known/oauth-protected-resource
+    C->>N: GET /memverse-mcp/.well-known/oauth-protected-resource
     N->>A: proxy (no auth needed)
     A-->>C: {"resource":"...", "authorization_servers":["https://host/auth/"]}
 
@@ -105,7 +105,7 @@ sequenceDiagram
     C->>A: POST /auth/token (code + code_verifier)
     A-->>C: {access_token, token_type, expires_in, refresh_token}
 
-    C->>N: GET /memory-mcp/cursor/sse (Authorization: Bearer eyJ...)
+    C->>N: GET /memverse-mcp/cursor/sse (Authorization: Bearer eyJ...)
     N->>A: auth_request /auth/verify
     A-->>N: 200 + X-Auth-User-Id, X-Auth-Username
     N->>M: proxy + X-Auth-* headers (Authorization stripped)
@@ -159,10 +159,10 @@ ChatGPT 原生支持 OAuth 2.0 配置：
 - `API_KEY` 环境变量 + `X-API-Key` 自定义 header + `ApiKeyMiddleware` 类
 - `AUTH_USERNAME` / `AUTH_PASSWORD` / `AUTH_SECRET` 环境变量
 - UI 的 HMAC session token 系统（[openmemory/ui/lib/auth.ts](openmemory/ui/lib/auth.ts)）
-- `MEM0_USER` / `USER_ID` 环境变量
+- `MEMVERSE_USER` / `USER_ID` 环境变量
 - `create_default_user()` / `create_default_app()` 启动逻辑
 - [nginx/nginx.conf](nginx/nginx.conf) line 82 硬编码的 `proxy_set_header X-API-Key`
-- OpenMemory API/MCP 中所有认证相关代码
+- Memverse API/MCP 中所有认证相关代码
 
 ---
 
@@ -291,7 +291,7 @@ location /auth/ {
 
 # ===== OAuth Protected Resource Metadata -- NO auth required =====
 # MCP clients fetch /{service}/.well-known/oauth-protected-resource
-location ~ ^/(memory-mcp|concierge-mcp)/\.well-known/oauth-protected-resource$ {
+location ~ ^/(memverse-mcp|concierge-mcp)/\.well-known/oauth-protected-resource$ {
     proxy_pass http://127.0.0.1:8760;
     rewrite ^/(.*)/\.well-known/oauth-protected-resource$
             /auth/resource-metadata/$1 break;
@@ -307,7 +307,7 @@ location = /internal/auth/verify {
     proxy_set_header Authorization $http_authorization;
 }
 
-# ===== Protected: OpenMemory API =====
+# ===== Protected: Memverse API =====
 location /api/ {
     auth_request /internal/auth/verify;
     auth_request_set $auth_user_id $upstream_http_x_auth_user_id;
@@ -324,8 +324,8 @@ location /api/ {
     # ... existing proxy headers ...
 }
 
-# ===== Protected: OpenMemory MCP SSE =====
-location /memory-mcp/ {
+# ===== Protected: Memverse MCP SSE =====
+location /memverse-mcp/ {
     auth_request /internal/auth/verify;
     auth_request_set $auth_user_id $upstream_http_x_auth_user_id;
     auth_request_set $auth_username $upstream_http_x_auth_username;
@@ -371,9 +371,9 @@ auth-service:
 
 ## Phase 2: 下游服务改造 + 项目隔离
 
-### 2.1 OpenMemory API/MCP 认证简化
+### 2.1 Memverse API/MCP 认证简化
 
-修改 [openmemory/api/main.py](openmemory/api/main.py) 和所有 routers：
+修改 [memverse/api/main.py](memverse/api/main.py) 和所有 routers：
 
 **删除：**
 
@@ -402,16 +402,16 @@ def get_current_user(request: Request) -> dict:
 
 ### 2.2 MCP OAuth 适配
 
-修改 [openmemory/api/app/mcp_server.py](openmemory/api/app/mcp_server.py)：
+修改 [memverse/api/app/mcp_server.py](memverse/api/app/mcp_server.py)：
 
 - **删除** URL 路径中的 `/{user_id}`
-- SSE URL 变为：`/memory-mcp/{client_name}/sse?project={slug}`
+- SSE URL 变为：`/memverse-mcp/{client_name}/sse?project={slug}`
 - 用户身份完全来自 nginx 注入的 `X-Auth-`* headers（OAuth 已在 gateway 完成）
 - MCP handler 从 request headers 读取用户信息，设入 ContextVar
 
 ### 2.3 新增 Project 模型 + Router
 
-在 OpenMemory DB ([openmemory/api/app/models.py](openmemory/api/app/models.py)) 新增：
+在 Memverse DB ([memverse/api/app/models.py](memverse/api/app/models.py)) 新增：
 
 **projects 表：** id(UUID), name, slug(unique), owner_id, description, created_at, updated_at
 
@@ -419,14 +419,14 @@ def get_current_user(request: Request) -> dict:
 
 **memories 表扩展：** 新增 project_id(FK, nullable for migration)
 
-新建 `openmemory/api/app/routers/projects.py`：
+新建 `memverse/api/app/routers/projects.py`：
 
 - CRUD + 成员管理
 - 鉴权：`get_current_user()` 拿到 user_id，查 `project_members` 判断角色
 
 ### 2.4 Memory 端点改造
 
-修改 [openmemory/api/app/routers/memories.py](openmemory/api/app/routers/memories.py)：
+修改 [memverse/api/app/routers/memories.py](memverse/api/app/routers/memories.py)：
 
 - 所有端点加 `project_slug` 参数
 - 权限校验：read 角色只能 search/list/get，normal 角色 CRUD，admin 角色 CRUD + 项目管理
@@ -438,12 +438,12 @@ def get_current_user(request: Request) -> dict:
 
 ## Phase 3: UI + 外部客户端
 
-### 3.1 OpenMemory UI 认证重构
+### 3.1 Memverse UI 认证重构
 
 **删除：**
 
-- [openmemory/ui/lib/auth.ts](openmemory/ui/lib/auth.ts) 中的 HMAC session 系统
-- [openmemory/ui/app/api/auth/login/route.ts](openmemory/ui/app/api/auth/login/route.ts) 中的环境变量校验
+- [memverse/ui/lib/auth.ts](memverse/ui/lib/auth.ts) 中的 HMAC session 系统
+- [memverse/ui/app/api/auth/login/route.ts](memverse/ui/app/api/auth/login/route.ts) 中的环境变量校验
 
 **新 Login 流程：**
 
@@ -452,7 +452,7 @@ def get_current_user(request: Request) -> dict:
 3. JWT 存 `om_token` cookie（SameSite=Strict，非 httpOnly）
 4. 若 must_change_password，跳转改密码页
 
-**Axios interceptor（[openmemory/ui/lib/api.ts](openmemory/ui/lib/api.ts)）：**
+**Axios interceptor（[memverse/ui/lib/api.ts](memverse/ui/lib/api.ts)）：**
 
 ```typescript
 api.interceptors.request.use((config) => {
@@ -462,7 +462,7 @@ api.interceptors.request.use((config) => {
 });
 ```
 
-**Next.js middleware（[openmemory/ui/middleware.ts](openmemory/ui/middleware.ts)）：** 读 `om_token` cookie，解码 JWT 检查 exp，过期则重定向 `/login`。
+**Next.js middleware（[memverse/ui/middleware.ts](memverse/ui/middleware.ts)）：** 读 `om_token` cookie，解码 JWT 检查 exp，过期则重定向 `/login`。
 
 **新增页面：**
 
@@ -501,7 +501,7 @@ API Key 方式：`Authorization: Bearer om_xxx`。
 
 ## Phase 4: 数据迁移
 
-新建 `openmemory/auth/scripts/migrate.py` 和 `openmemory/api/scripts/migrate_projects.py`：
+新建 `memverse/auth/scripts/migrate.py` 和 `memverse/api/scripts/migrate_projects.py`：
 
 1. 在 auth.db 创建 `arthaszeng` 为 superadmin（临时密码）
 2. 在 openmemory.db 创建 "arthaszeng" 默认项目
@@ -515,14 +515,14 @@ API Key 方式：`Authorization: Bearer om_xxx`。
 
 **删除：**
 
-- `API_KEY`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `AUTH_SECRET`, `MEM0_USER`
+- `API_KEY`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `AUTH_SECRET`, `MEMVERSE_USER`
 
 **新增 (auth-service)：**
 
 - `INIT_ADMIN_USER` / `INIT_ADMIN_PASSWORD` -- 首次启动创建 admin（之后忽略）
 - `AUTH_BASE_URL` -- Auth Service 对外 URL（OAuth metadata 中使用）
 
-**保留 (openmemory)：**
+**保留 (memverse)：**
 
 - `OPENAI_API_KEY`, `OPENAI_BASE_URL` 等 LLM/Embedding 配置不变
 
@@ -530,7 +530,7 @@ API Key 方式：`Authorization: Bearer om_xxx`。
 
 **auth-service (新)：** fastapi, uvicorn, sqlalchemy, PyJWT, cryptography (RS256), bcrypt, jinja2
 
-**openmemory-api (移除 auth 依赖)：** 不再需要认证相关库
+**memverse-api (移除 auth 依赖)：** 不再需要认证相关库
 
 ---
 
@@ -538,7 +538,7 @@ API Key 方式：`Authorization: Bearer om_xxx`。
 
 **认证与业务完全分离：**
 
-- Auth Service 只管认证（who are you），OpenMemory 只管记忆业务，nginx 只管路由和认证委派
+- Auth Service 只管认证（who are you），Memverse 只管记忆业务，nginx 只管路由和认证委派
 - 新增服务只需在 nginx 加一个 `location` 块 + `auth_request`，零代码修改
 - JWT 和 API Key 对 gateway 来说是统一接口（Bearer token），下游服务不感知 token 类型
 - 下游服务只依赖 3 个 header（`X-Auth-User-Id`, `X-Auth-Username`, `X-Auth-Is-Superadmin`），不依赖 auth 实现
@@ -635,7 +635,7 @@ cp openmemory.db.bak.* openmemory.db
 
 # 4. 重启 OpenMemory（旧代码在 main 分支）
 git checkout main
-docker-compose up -d openmemory-mcp
+docker-compose up -d memverse-mcp
 
 # 5. Qdrant 不需要恢复（增量字段不影响旧查询）
 # 如果确实需要恢复：POST /collections/openmemory/snapshots/{name}/restore

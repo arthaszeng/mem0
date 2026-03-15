@@ -2,7 +2,7 @@
 
 ## 问题现象
 
-Cursor 连接 OpenMemory MCP 时报错：
+Cursor 连接 Memverse MCP 时报错：
 
 ```
 Error POSTing to endpoint: {"detail":"Method Not Allowed"}
@@ -10,7 +10,7 @@ Error POSTing to endpoint: {"detail":"Method Not Allowed"}
 
 ## 根本原因
 
-**Cursor 已默认使用 Streamable HTTP 传输**，而 OpenMemory 目前只实现了 legacy SSE 传输，两者协议不兼容。
+**Cursor 已默认使用 Streamable HTTP 传输**，而 Memverse 目前只实现了 legacy SSE 传输，两者协议不兼容。
 
 | 传输方式 | 客户端行为 | 服务端当前实现 |
 |----------|------------|----------------|
@@ -21,25 +21,25 @@ Error POSTing to endpoint: {"detail":"Method Not Allowed"}
 
 ### 当前 SSE 流程
 
-1. 客户端 GET `https://host/memory-mcp/cursor/sse/arthaszeng`
-2. 服务端建立 SSE 连接，返回 `event: endpoint`，`data: /memory-mcp/messages/?session_id=xxx`
-3. 客户端 POST 到 `https://host/memory-mcp/messages/?session_id=xxx` 发送 MCP 消息
+1. 客户端 GET `https://host/memverse-mcp/cursor/sse/arthaszeng`
+2. 服务端建立 SSE 连接，返回 `event: endpoint`，`data: /memverse-mcp/messages/?session_id=xxx`
+3. 客户端 POST 到 `https://host/memverse-mcp/messages/?session_id=xxx` 发送 MCP 消息
 
 ### Cursor (Streamable HTTP) 实际行为
 
-1. 客户端直接 **POST** 到配置的 URL：`https://host/memory-mcp/cursor/sse/arthaszeng`
+1. 客户端直接 **POST** 到配置的 URL：`https://host/memverse-mcp/cursor/sse/arthaszeng`
 2. 服务端该路径只有 GET 处理器 → **405 Method Not Allowed**
 
 ### 受影响的路径
 
 所有 SSE 端点路径，当收到 POST 时都会返回 405：
 
-- `GET /memory-mcp/{client_name}/sse` ✅
-- `GET /memory-mcp/{client_name}/sse/{user_id}` ✅
-- `POST /memory-mcp/{client_name}/sse` ❌ 无处理器
-- `POST /memory-mcp/{client_name}/sse/{user_id}` ❌ 无处理器
-- `GET /memory-mcp/p/{project_slug}/{client_name}/sse` ✅
-- `POST /memory-mcp/p/{project_slug}/{client_name}/sse` ❌ 无处理器
+- `GET /memverse-mcp/{client_name}/sse` ✅
+- `GET /memverse-mcp/{client_name}/sse/{user_id}` ✅
+- `POST /memverse-mcp/{client_name}/sse` ❌ 无处理器
+- `POST /memverse-mcp/{client_name}/sse/{user_id}` ❌ 无处理器
+- `GET /memverse-mcp/p/{project_slug}/{client_name}/sse` ✅
+- `POST /memverse-mcp/p/{project_slug}/{client_name}/sse` ❌ 无处理器
 
 ## 解决方案（服务端修复）
 
@@ -71,6 +71,6 @@ Error POSTing to endpoint: {"detail":"Method Not Allowed"}
 
 ## 影响范围
 
-- **所有通过 Cursor 连接 OpenMemory MCP 的用户** 都会遇到此问题
+- **所有通过 Cursor 连接 Memverse MCP 的用户** 都会遇到此问题
 - 其他仍使用 legacy SSE 的客户端（如旧版 MCP Inspector）不受影响
 - 修复后需重新部署服务，用户无需改 Cursor 配置

@@ -8,23 +8,23 @@ services:
       - ./nginx/cert:/etc/nginx/cert:ro
     depends_on:
       - auth-service
-      - openmemory-mcp
-      - openmemory-ui
+      - memverse-mcp
+      - memverse-ui
       - concierge-mcp
     restart: unless-stopped
 
   # ===== Vector Store =====
-  mem0-store:
+  memverse-store:
     image: qdrant/qdrant
     ports:
       - "127.0.0.1:6333:6333"
     volumes:
-      - mem0_storage:/qdrant/storage
+      - memverse_storage:/qdrant/storage
     restart: unless-stopped
 
   # ===== Auth Service =====
   auth-service:
-    image: mem0/auth-service:${APP_VERSION:-latest}
+    image: memverse/auth-service:${APP_VERSION:-latest}
     env_file: .env
     ports:
       - "127.0.0.1:8760:8760"
@@ -32,34 +32,34 @@ services:
       - auth_data:/data
     restart: unless-stopped
 
-  # ===== OpenMemory API + MCP =====
-  openmemory-mcp:
-    image: mem0/openmemory-mcp:${APP_VERSION:-latest}
+  # ===== Memverse API + MCP =====
+  memverse-mcp:
+    image: memverse/memverse-mcp:${APP_VERSION:-latest}
     env_file: .env
     depends_on:
-      - mem0-store
+      - memverse-store
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
-      - openmemory_data:/data
+      - memverse_data:/data
     restart: unless-stopped
 
-  # ===== OpenMemory UI =====
-  openmemory-ui:
-    image: mem0/openmemory-ui:${APP_VERSION:-latest}
+  # ===== Memverse UI =====
+  memverse-ui:
+    image: memverse/memverse-ui:${APP_VERSION:-latest}
     env_file: .env
     depends_on:
-      - openmemory-mcp
+      - memverse-mcp
     ports:
       - "127.0.0.1:3001:3000"
     restart: unless-stopped
 
   # ===== Concierge MCP =====
   concierge-mcp:
-    image: mem0/concierge-mcp:${APP_VERSION:-latest}
+    image: memverse/concierge-mcp:${APP_VERSION:-latest}
     env_file: .env
     depends_on:
-      - openmemory-mcp
+      - memverse-mcp
     ports:
       - "127.0.0.1:8767:8767"
     restart: unless-stopped
@@ -76,12 +76,12 @@ services:
       - NEXT_PUBLIC_BASE_PATH=/chat
       - PORT=3210
     depends_on:
-      - openmemory-mcp
+      - memverse-mcp
     restart: unless-stopped
 
   # ===== LangGraph Agent =====
   langgraph-agent:
-    image: mem0/langgraph-agent:${APP_VERSION:-latest}
+    image: memverse/langgraph-agent:${APP_VERSION:-latest}
     ports:
       - "127.0.0.1:8766:8766"
     environment:
@@ -89,7 +89,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://millionengine.com/v1}
       - LLM_MODEL=${LLM_MODEL:-qwen-plus}
     depends_on:
-      - openmemory-mcp
+      - memverse-mcp
     restart: unless-stopped
     deploy:
       resources:
@@ -100,9 +100,9 @@ volumes:
   auth_data:
     external: true
     name: mem0_auth_data
-  mem0_storage:
+  memverse_storage:
     external: true
     name: openmemory_mem0_storage
-  openmemory_data:
+  memverse_data:
     external: true
     name: openmemory_openmemory_data

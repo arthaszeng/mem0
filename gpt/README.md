@@ -1,13 +1,13 @@
 # AI 客户端接入指南
 
-本目录包含将各类 AI 客户端接入 OpenMemory 和 Concierge 的配置模板。
+本目录包含将各类 AI 客户端接入 Memverse 和 Concierge 的配置模板。
 
 ## 服务端点
 
 | 服务 | HTTP (MCP SSE) | REST API |
 |------|----------------|----------|
-| OpenMemory MCP | `http://<host>/memory-mcp/{client}/sse/{user_id}` | — |
-| OpenMemory API | — | `/api/v1/memories/` (需 OAuth2 Bearer token) |
+| Memverse MCP | `http://<host>/memverse-mcp/{client}/sse/{user_id}` | — |
+| Memverse API | — | `/api/v1/memories/` (需 OAuth2 Bearer token) |
 | Concierge MCP | `http://<host>/concierge-mcp/sse` | — |
 | Concierge API | — | `/concierge-mcp/api/chat`, `/concierge-mcp/api/search` (需 Sanofi 会话) |
 
@@ -24,8 +24,8 @@
 ```jsonc
 {
   "mcpServers": {
-    "OpenMemory": {
-      "url": "http://47.108.141.20/memory-mcp/cursor/sse/arthaszeng"
+    "Memverse": {
+      "url": "http://47.108.141.20/memverse-mcp/cursor/sse/arthaszeng"
       //                                    ^^^^^^     ^^^^^^^^^^
       //                                  客户端名称    用户 ID
     },
@@ -53,9 +53,9 @@
 
 因 GPT Actions 不支持 SSE，通过 REST API 接入。有两个版本：
 
-#### 2a. 公开版 — OpenMemory GPT（仅记忆，OAuth2）
+#### 2a. 公开版 — Memverse GPT（仅记忆，OAuth2）
 
-面向公网发布的 GPT，仅包含 OpenMemory 记忆功能。用户通过 OAuth2 登录认证。
+面向公网发布的 GPT，仅包含 Memverse 记忆功能。用户通过 OAuth2 登录认证。
 
 **配置文件**:
 - OpenAPI Schema: [`chatgpt-action-schema-public.json`](./chatgpt-action-schema-public.json)
@@ -85,7 +85,7 @@
 curl -X POST https://arthaszeng.top/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "client_name": "ChatGPT-OpenMemory-Public",
+    "client_name": "ChatGPT-Memverse-Public",
     "redirect_uris": ["<ChatGPT-Callback-URL>"],
     "grant_types": ["authorization_code", "refresh_token"],
     "token_endpoint_auth_method": "none"
@@ -96,7 +96,7 @@ curl -X POST https://arthaszeng.top/auth/register \
 
 #### 2b. 私有版 — Arthas AI Platform GPT（记忆 + Concierge，Bearer token）
 
-仅 Arthas 个人使用，包含 OpenMemory + Concierge 双服务。使用长期 JWT Bearer token 认证。
+仅 Arthas 个人使用，包含 Memverse + Concierge 双服务。使用长期 JWT Bearer token 认证。
 
 **配置文件**:
 - OpenAPI Schema: [`chatgpt-action-schema.json`](./chatgpt-action-schema.json)
@@ -117,7 +117,7 @@ curl -X POST https://arthaszeng.top/auth/register \
 ```bash
 # 通过 auth-service 登录获取 token，或直接在服务器上签发长期 token：
 ssh -i ~/.ssh/arthas admin@47.108.141.20 \
-  "docker exec openmemory-auth-service-1 python -c \"
+  "docker exec memverse-auth-service-1 python -c \"
 from jwt_utils import sign_access_token
 token = sign_access_token(user_id=1, username='arthaszeng', scopes='', expires_seconds=31536000)
 print(token)
@@ -131,10 +131,10 @@ print(token)
 > 域名已完成 ICP 备案，不再需要 Cloudflare Tunnel 绕行。
 
 **认证差异**:
-- OpenMemory API：通过 Bearer JWT token 认证（nginx auth_request 校验）
+- Memverse API：通过 Bearer JWT token 认证（nginx auth_request 校验）
 - Concierge API：需要服务器上有 Sanofi 活跃会话（通过 Chrome 扩展注入 token）
 
 ### 3. Lobe Chat（内置）
 
 Lobe Chat 已部署在同一服务器，通过 `https://arthaszeng.top:3211/` 访问。
-可在 Lobe Chat 插件设置中配置 OpenMemory API 地址为 `http://127.0.0.1:8765`。
+可在 Lobe Chat 插件设置中配置 Memverse API 地址为 `http://127.0.0.1:8765`。

@@ -1,11 +1,11 @@
-"""OpenMemory tools for LangGraph agent — search and store memories via REST API."""
+"""Memverse tools for LangGraph agent — search and store memories via REST API."""
 
 import os
 
 import httpx
 from langchain_core.tools import tool
 
-OPENMEMORY_API = os.getenv("OPENMEMORY_API_URL", "http://openmemory-mcp:8765")
+MEMVERSE_API = os.getenv("MEMVERSE_API", "http://memverse-mcp:8765")
 DEFAULT_USER = "arthaszeng"
 
 
@@ -13,7 +13,7 @@ DEFAULT_USER = "arthaszeng"
 def search_memory(query: str, user_id: str = DEFAULT_USER, limit: int = 5) -> str:
     """Search long-term memories by semantic similarity. Use when you need context about the user."""
     resp = httpx.post(
-        f"{OPENMEMORY_API}/api/v1/memories/search",
+        f"{MEMVERSE_API}/api/v1/memories/search",
         json={"query": query, "user_id": user_id, "limit": limit, "threshold": 0.1},
         timeout=15,
     )
@@ -32,7 +32,7 @@ def search_memory(query: str, user_id: str = DEFAULT_USER, limit: int = 5) -> st
 def store_memory(text: str, user_id: str = DEFAULT_USER) -> str:
     """Store important information in long-term memory. Use for facts, decisions, preferences worth remembering."""
     resp = httpx.post(
-        f"{OPENMEMORY_API}/api/v1/memories/",
+        f"{MEMVERSE_API}/api/v1/memories/",
         json={
             "text": text,
             "user_id": user_id,
@@ -52,7 +52,7 @@ def store_memory(text: str, user_id: str = DEFAULT_USER) -> str:
 def list_memories(user_id: str = DEFAULT_USER, limit: int = 20) -> str:
     """List all stored memories for the user."""
     resp = httpx.get(
-        f"{OPENMEMORY_API}/api/v1/memories/",
+        f"{MEMVERSE_API}/api/v1/memories/",
         params={"user_id": user_id, "size": limit},
         timeout=15,
     )

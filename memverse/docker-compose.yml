@@ -1,0 +1,51 @@
+services:
+  memverse_store:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - memverse_storage:/qdrant/storage
+
+  memverse-mcp:
+    build:
+      context: api/
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    image: memverse/memverse-mcp:${APP_VERSION:-dev}
+    environment:
+      - MEMVERSE_USER=${MEMVERSE_USER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-dummy-key}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - API_KEY=${API_KEY:-}
+      - CATEGORIZATION_PROVIDER=${CATEGORIZATION_PROVIDER:-ollama}
+      - CATEGORIZATION_MODEL=${CATEGORIZATION_MODEL:-}
+      - FORCE_OPENAI=${FORCE_OPENAI:-}
+      - APP_VERSION=${APP_VERSION:-dev}
+    depends_on:
+      - memverse_store
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./api:/usr/src/memverse
+    command: >
+      sh -c "uvicorn main:app --host 0.0.0.0 --port 8765 --reload"
+
+  memverse-ui:
+    build:
+      context: ui/
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    image: memverse/memverse-ui:${APP_VERSION:-dev}
+    ports:
+      - "3001:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - AUTH_SECRET=${AUTH_SECRET}
+    depends_on:
+      - memverse-mcp
+
+volumes:
+  memverse_storage:

@@ -1,4 +1,4 @@
-"""LangGraph agent with OpenMemory tools — callable via FastAPI."""
+"""LangGraph agent with Memverse tools — callable via FastAPI."""
 
 import os
 import uuid

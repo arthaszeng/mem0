@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Migrate existing single-user OpenMemory data to multi-user auth system.
+"""Migrate existing single-user Memverse data to multi-user auth system.
 
 Run this ONCE after deploying Phase 1-3 to:
 1. Ensure auth.db has the admin user
-2. Create a default project in OpenMemory and assign all existing memories to it
-3. Ensure the OpenMemory User matches the auth-service admin user
+2. Create a default project in Memverse and assign all existing memories to it
+3. Ensure the Memverse User matches the auth-service admin user
 4. Update Qdrant vector payloads to include project_id
 
 Usage:
-    docker exec mem0-openmemory-mcp-1 python3 /scripts/migrate_to_multiuser.py
+    docker exec workspace-memverse-mcp-1 python3 /scripts/migrate_to_multiuser.py
 
 Or run locally with correct DB paths:
-    OPENMEMORY_DB=/path/to/openmemory.db \
+    MEMVERSE_DB=/path/to/openmemory.db \
     QDRANT_HOST=localhost QDRANT_PORT=6333 \
     python3 scripts/migrate_to_multiuser.py
 """
@@ -31,7 +31,7 @@ except ImportError:
 
 
 AUTH_DB = os.getenv("AUTH_DB", "/data/auth.db")
-OPENMEMORY_DB = os.getenv("OPENMEMORY_DB", "/data/openmemory.db")
+MEMVERSE_DB = os.getenv("MEMVERSE_DB", "/data/openmemory.db")
 ADMIN_USERNAME = os.getenv("INIT_ADMIN_USER", "arthaszeng")
 DEFAULT_PROJECT_NAME = os.getenv("DEFAULT_PROJECT_NAME", "Default")
 DEFAULT_PROJECT_SLUG = os.getenv("DEFAULT_PROJECT_SLUG", "default")
@@ -50,11 +50,11 @@ def migrate():
     print("=" * 60)
 
     # 1. Check databases exist
-    if not os.path.exists(OPENMEMORY_DB):
-        print(f"ERROR: OpenMemory DB not found at {OPENMEMORY_DB}")
+    if not os.path.exists(MEMVERSE_DB):
+        print(f"ERROR: Memverse DB not found at {MEMVERSE_DB}")
         sys.exit(1)
 
-    om = sqlite3.connect(OPENMEMORY_DB)
+    om = sqlite3.connect(MEMVERSE_DB)
     om.row_factory = sqlite3.Row
 
     print(f"\n[1/4] Checking OpenMemory database...")

@@ -15,9 +15,9 @@ log_step "Rolling back cloud deployment"
 # ── Step 1: Restore images ──
 log_step "Restoring pre-upgrade images"
 ssh_cloud "
-  for svc in openmemory-mcp openmemory-ui auth-service concierge-mcp langgraph-agent; do
-    if docker image inspect mem0/\${svc}:pre-upgrade >/dev/null 2>&1; then
-      docker tag mem0/\${svc}:pre-upgrade mem0/\${svc}:latest
+  for svc in memverse-mcp memverse-ui auth-service concierge-mcp langgraph-agent; do
+    if docker image inspect memverse/\${svc}:pre-upgrade >/dev/null 2>&1; then
+      docker tag memverse/\${svc}:pre-upgrade memverse/\${svc}:latest
       echo \"  Restored mem0/\${svc}:latest\"
     else
       echo \"  WARN: mem0/\${svc}:pre-upgrade not found, skipping\"
@@ -48,10 +48,10 @@ if [[ "$FULL_ROLLBACK" == true ]]; then
     fi
 
     cd ${CLOUD_WORKSPACE}
-    docker compose stop openmemory-mcp auth-service 2>/dev/null
+    docker compose stop memverse-mcp auth-service 2>/dev/null
 
     if [ -f \"\$LATEST_BACKUP/openmemory.db\" ]; then
-      docker cp \"\$LATEST_BACKUP/openmemory.db\" workspace-openmemory-mcp-1:/data/openmemory.db
+      docker cp \"\$LATEST_BACKUP/openmemory.db\" workspace-memverse-mcp-1:/data/openmemory.db
       echo 'Restored openmemory.db'
     fi
     if [ -f \"\$LATEST_BACKUP/auth.db\" ]; then

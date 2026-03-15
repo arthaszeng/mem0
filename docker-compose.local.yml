@@ -8,60 +8,60 @@ services:
       - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - auth-service
-      - openmemory-mcp
-      - openmemory-ui
+      - memverse-mcp
+      - memverse-ui
     restart: unless-stopped
 
   # ===== Auth Service (OAuth 2.1 Authorization Server) =====
   auth-service:
     build:
-      context: openmemory/auth/
+      context: memverse/auth/
       args:
         APP_VERSION: ${APP_VERSION}
-    image: mem0/auth-service:${APP_VERSION}
+    image: memverse/auth-service:${APP_VERSION}
     env_file: .env.local
     volumes:
-      - ./openmemory/auth:/app
+      - ./memverse/auth:/app
       - auth_data:/data
     command: >
       sh -c "uvicorn main:app --host 0.0.0.0 --port 8760 --reload"
     restart: unless-stopped
 
   # ===== Vector Store =====
-  mem0-store:
+  memverse-store:
     image: qdrant/qdrant
     volumes:
-      - mem0_storage:/qdrant/storage
+      - memverse_storage:/qdrant/storage
     restart: unless-stopped
 
-  # ===== OpenMemory API + MCP =====
-  openmemory-mcp:
+  # ===== Memverse API + MCP =====
+  memverse-mcp:
     build:
-      context: openmemory/api/
+      context: memverse/api/
       args:
         APP_VERSION: ${APP_VERSION}
-    image: mem0/openmemory-mcp:${APP_VERSION}
+    image: memverse/memverse-mcp:${APP_VERSION}
     env_file: .env.local
     depends_on:
-      - mem0-store
+      - memverse-store
     volumes:
-      - ./openmemory/api:/usr/src/openmemory
-      - openmemory_data:/data
+      - ./memverse/api:/usr/src/memverse
+      - memverse_data:/data
     command: >
       sh -c "uvicorn main:app --host 0.0.0.0 --port 8765 --reload"
     restart: unless-stopped
 
-  # ===== OpenMemory UI =====
-  openmemory-ui:
+  # ===== Memverse UI =====
+  memverse-ui:
     build:
-      context: openmemory/ui/
+      context: memverse/ui/
       dockerfile: Dockerfile
       args:
         APP_VERSION: ${APP_VERSION}
-    image: mem0/openmemory-ui:${APP_VERSION}
+    image: memverse/memverse-ui:${APP_VERSION}
     env_file: .env.local
     depends_on:
-      - openmemory-mcp
+      - memverse-mcp
     restart: unless-stopped
 
   # ===== Concierge MCP =====
@@ -70,11 +70,11 @@ services:
       context: concierge/
       args:
         APP_VERSION: ${APP_VERSION}
-    image: mem0/concierge-mcp:${APP_VERSION}
+    image: memverse/concierge-mcp:${APP_VERSION}
     env_file: .env.local
     restart: unless-stopped
 
 volumes:
   auth_data:
-  mem0_storage:
-  openmemory_data:
+  memverse_storage:
+  memverse_data:

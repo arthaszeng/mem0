@@ -323,7 +323,7 @@ class TestSyntheticImport:
             "memories": [{
                 "id": fake_id,
                 "user_id": str(uuid.uuid4()),
-                "app_name": "openmemory",
+                "app_name": "memverse",
                 "content": f"synthetic memory {tag}",
                 "metadata": {},
                 "state": "active",
@@ -342,7 +342,7 @@ class TestSyntheticImport:
             "created_at": "2026-01-01T00:00:00+00:00",
             "updated_at": "2026-01-01T00:00:00+00:00",
             "state": "active",
-            "app": "openmemory",
+            "app": "memverse",
             "categories": [],
             "project_slug": None,
             "creator_username": "fake_exporter",

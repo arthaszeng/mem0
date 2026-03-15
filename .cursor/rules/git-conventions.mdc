@@ -28,8 +28,8 @@ alwaysApply: true
 
 ### Scope
 
-- `api` — OpenMemory API/MCP server
-- `ui` — OpenMemory UI
+- `api` — Memverse API/MCP server
+- `ui` — Memverse UI
 - `plugin` — OpenClaw 插件
 - `docker` — Docker/部署配置
 - `memory` — 记忆系统（work-memory）

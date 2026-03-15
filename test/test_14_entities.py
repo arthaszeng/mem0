@@ -17,7 +17,7 @@ class TestListEntities:
 
 class TestSearchEntities:
     def test_search_entities(self, admin_token):
-        r = api_get(admin_token, "/api/v1/entities/search", params={"query": "OpenMemory"})
+        r = api_get(admin_token, "/api/v1/entities/search", params={"query": "Memverse"})
         assert r.status_code == 200
 
     def test_search_entities_no_match(self, admin_token):

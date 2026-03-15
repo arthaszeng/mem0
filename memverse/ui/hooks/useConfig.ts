@@ -1,0 +1,130 @@
+import { useState } from 'react';
+import api from '@/lib/api';
+import { useDispatch, useSelector } from 'react-redux';
+import { AppDispatch, RootState } from '@/store/store';
+import {
+  setConfigLoading,
+  setConfigSuccess,
+  setConfigError,
+  updateLLM,
+  updateEmbedder,
+  updateMem0Config,
+  updateMemverse,
+  LLMProvider,
+  EmbedderProvider,
+  Mem0Config,
+  MemverseConfig
+} from '@/store/configSlice';
+
+interface UseConfigApiReturn {
+  fetchConfig: () => Promise<void>;
+  saveConfig: (config: { memverse?: MemverseConfig; mem0: Mem0Config }) => Promise<void>;
+  saveLLMConfig: (llmConfig: LLMProvider) => Promise<void>;
+  saveEmbedderConfig: (embedderConfig: EmbedderProvider) => Promise<void>;
+  resetConfig: () => Promise<void>;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export const useConfig = (): UseConfigApiReturn => {
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const dispatch = useDispatch<AppDispatch>();
+  
+  const fetchConfig = async () => {
+    setIsLoading(true);
+    dispatch(setConfigLoading());
+    
+    try {
+      const response = await api.get(`/api/v1/config`);
+      dispatch(setConfigSuccess(response.data));
+      setIsLoading(false);
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to fetch configuration';
+      dispatch(setConfigError(errorMessage));
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  };
+
+  const saveConfig = async (config: { memverse?: MemverseConfig; mem0: Mem0Config }) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await api.put(`/api/v1/config`, config);
+      dispatch(setConfigSuccess(response.data));
+      setIsLoading(false);
+      return response.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to save configuration';
+      dispatch(setConfigError(errorMessage));
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  };
+
+  const resetConfig = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await api.post(`/api/v1/config/reset`);
+      dispatch(setConfigSuccess(response.data));
+      setIsLoading(false);
+      return response.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to reset configuration';
+      dispatch(setConfigError(errorMessage));
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  };
+
+  const saveLLMConfig = async (llmConfig: LLMProvider) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await api.put(`/api/v1/config/mem0/llm`, llmConfig);
+      dispatch(updateLLM(response.data));
+      setIsLoading(false);
+      return response.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to save LLM configuration';
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  };
+
+  const saveEmbedderConfig = async (embedderConfig: EmbedderProvider) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await api.put(`/api/v1/config/mem0/embedder`, embedderConfig);
+      dispatch(updateEmbedder(response.data));
+      setIsLoading(false);
+      return response.data;
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to save Embedder configuration';
+      setError(errorMessage);
+      setIsLoading(false);
+      throw new Error(errorMessage);
+    }
+  };
+
+  return {
+    fetchConfig,
+    saveConfig,
+    saveLLMConfig,
+    saveEmbedderConfig,
+    resetConfig,
+    isLoading,
+    error
+  };
+}; 

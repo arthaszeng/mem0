@@ -40,8 +40,8 @@ type Mem0Config = {
     llm?: { provider: string; config: Record<string, unknown> };
     historyDbPath?: string;
   };
-  // OpenMemory API for bidirectional sync (PostgreSQL registration)
-  openMemoryApiUrl?: string;
+  // Memverse API for bidirectional sync (PostgreSQL registration)
+  memverseApiUrl?: string;
   // Shared
   userId: string;
   autoCapture: boolean;
@@ -207,7 +207,7 @@ class PlatformProvider implements Mem0Provider {
 // ============================================================================
 // Open-Source Provider (Self-hosted)
 //
-// Pure REST API client — all operations go through the OpenMemory API which
+// Pure REST API client — all operations go through the Memverse API which
 // handles embedding, Qdrant, SQLite, and LLM extraction internally. No direct
 // Qdrant or Ollama dependency, so embedding dimensions always match the server.
 // ============================================================================
@@ -220,10 +220,10 @@ class OSSProvider implements Mem0Provider {
     private readonly ossConfig?: Mem0Config["oss"],
     private readonly customPrompt?: string,
     private readonly resolvePath?: (p: string) => string,
-    openMemoryApiUrl?: string,
+    memverseApiUrl?: string,
     userId?: string,
   ) {
-    this.apiUrl = (openMemoryApiUrl ?? "http://localhost:8765").replace(/\/+$/, "");
+    this.apiUrl = (memverseApiUrl ?? "http://localhost:8765").replace(/\/+$/, "");
     this.userId = userId ?? "default";
   }
 
@@ -530,7 +530,7 @@ const ALLOWED_KEYS = [
   "searchThreshold",
   "topK",
   "oss",
-  "openMemoryApiUrl",
+  "memverseApiUrl",
 ];
 
 function assertAllowedKeys(
@@ -601,9 +601,9 @@ const mem0ConfigSchema = {
         typeof cfg.searchThreshold === "number" ? cfg.searchThreshold : 0.1,
       topK: typeof cfg.topK === "number" ? cfg.topK : 5,
       oss: ossConfig,
-      openMemoryApiUrl:
-        typeof cfg.openMemoryApiUrl === "string"
-          ? cfg.openMemoryApiUrl
+      memverseApiUrl:
+        typeof cfg.memverseApiUrl === "string"
+          ? cfg.memverseApiUrl
           : "http://localhost:8765",
     };
   },
@@ -619,7 +619,7 @@ function createProvider(
 ): Mem0Provider {
   if (cfg.mode === "open-source") {
     return new OSSProvider(cfg.oss, cfg.customPrompt, (p) =>
-      api.resolvePath(p), cfg.openMemoryApiUrl, cfg.userId,
+      api.resolvePath(p), cfg.memverseApiUrl, cfg.userId,
     );
   }
 

@@ -1,8 +1,8 @@
 {
-  "name": "@mem0/openclaw-mem0",
-  "version": "0.1.2",
+  "name": "@memverse/openclaw",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Mem0 memory backend for OpenClaw — platform or self-hosted open-source",
+  "description": "Memverse memory backend for OpenClaw — platform or self-hosted open-source",
   "license": "Apache-2.0",
   "keywords": [
     "openclaw",

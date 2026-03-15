@@ -12,12 +12,13 @@ VERSION=$(cat "$PROJECT_ROOT/VERSION" | tr -d '[:space:]')
 
 # ---------- Services (name:build_context) ----------
 SERVICES=(
-  "openmemory-mcp:openmemory/api"
-  "auth-service:openmemory/auth"
-  "openmemory-ui:openmemory/ui"
+  "memverse-mcp:memverse/api"
+  "auth-service:memverse/auth"
+  "memverse-ui:memverse/ui"
   "concierge-mcp:concierge"
+  "langgraph-agent:langgraph-agent"
 )
-IMAGE_PREFIX="mem0"
+IMAGE_PREFIX="memverse"
 
 # ---------- ACR (Alibaba Cloud Container Registry) ----------
 ACR_PUBLIC="crpi-xsgmoqneyleca8gg.cn-chengdu.personal.cr.aliyuncs.com"

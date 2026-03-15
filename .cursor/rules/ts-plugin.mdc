@@ -10,14 +10,14 @@ alwaysApply: false
 
 - **入口**: `openclaw/index.ts`（~1500 行，包含完整插件逻辑）
 - **SDK**: `mem0ai` JS SDK，直接操作 Qdrant REST API
-- **数据流**: OpenClaw → mem0 JS SDK → Qdrant → 同时注册到 OpenMemory SQLite
+- **数据流**: OpenClaw → mem0 JS SDK → Qdrant → 同时注册到 Memverse SQLite
 
 ## 关键约定
 
 - Qdrant payload **统一 snake_case**：`user_id`, `created_at`, `updated_at`
-- 写入 Qdrant 后必须调用 OpenMemory `/api/v1/memories/register` 注册到 SQLite
+- 写入 Qdrant 后必须调用 Memverse `/api/v1/memories/register` 注册到 SQLite
 - 搜索过滤器只使用 `must` 子句 + `user_id` 字段，不用 `should`
-- 配置中 `openMemoryApiUrl` 指向 OpenMemory API 地址
+- 配置中 `memverseApiUrl` 指向 Memverse API 地址
 
 ## 性能注意
 
@@ -28,5 +28,5 @@ alwaysApply: false
 ## 调试
 
 - 插件日志通过 `this.log()` 输出
-- Qdrant REST API 可直接 curl 验证：`http://localhost:6333/collections/openmemory_768/points`
-- SQLite 数据库在 Docker 卷中：`docker exec -it openmemory-openmemory-mcp-1 sqlite3 /data/openmemory.db`
+- Qdrant REST API 可直接 curl 验证：`http://localhost:6333/collections/memverse_768/points`
+- SQLite 数据库在 Docker 卷中：`docker exec -it memverse-memverse-mcp-1 sqlite3 /data/openmemory.db`

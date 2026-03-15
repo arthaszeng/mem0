@@ -15,7 +15,7 @@ case "$TARGET" in
     log_step "Building local (arm64) images v${VERSION}"
     cd "$PROJECT_ROOT"
     APP_VERSION="$VERSION" docker compose -f docker-compose.local.yml build
-    log_info "Local build complete. Images tagged as mem0/<service>:${VERSION}"
+    log_info "Local build complete. Images tagged as memverse/<service>:${VERSION}"
     ;;
 
   --cloud)
@@ -30,7 +30,7 @@ case "$TARGET" in
         -t "$tag" \
         "$PROJECT_ROOT/$ctx"
     done
-    log_info "Cloud build complete. All images tagged as mem0/<service>:${VERSION}-amd64"
+    log_info "Cloud build complete. All images tagged as memverse/<service>:${VERSION}-amd64"
     ;;
 
   *)

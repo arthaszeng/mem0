@@ -1,0 +1,34 @@
+{
+    "memverse": {
+      "custom_instructions": null
+    },
+    "mem0": {
+      "llm": {
+        "provider": "ollama",
+        "config": {
+          "model": "qwen2.5:7b",
+          "temperature": 0,
+          "max_tokens": 800,
+          "api_key": null,
+          "ollama_base_url": "http://host.docker.internal:11434"
+        }
+      },
+      "embedder": {
+        "provider": "ollama",
+        "config": {
+          "model": "nomic-embed-text",
+          "api_key": null,
+          "ollama_base_url": "http://host.docker.internal:11434"
+        }
+      },
+      "vector_store": {
+        "provider": "qdrant",
+        "config": {
+          "host": "memverse_store",
+          "port": 6333,
+          "collection_name": "memverse_768",
+          "embedding_model_dims": 768
+        }
+      }
+    }
+  }

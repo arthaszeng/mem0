@@ -1,9 +1,9 @@
 ---
-description: mem0 项目总览 — 帮助 AI 快速理解项目结构和技术架构
+description: Memverse 项目总览 — 帮助 AI 快速理解项目结构和技术架构
 alwaysApply: true
 ---
 
-# mem0 项目总览
+# Memverse 项目总览
 
 本仓库 fork 自 `mem0ai/mem0`，核心目标是**让不同 AI 客户端共享统一的记忆存储**。
 
@@ -14,7 +14,7 @@ mem0/
 ├── openclaw/          # OpenClaw AI 助手的 mem0 插件（TypeScript）
 │   ├── index.ts       # 插件主逻辑
 │   └── package.json
-├── openmemory/
+├── memverse/
 │   ├── api/app/       # Python FastAPI 后端
 │   │   ├── mcp_server.py      # MCP Server（SSE 传输）
 │   │   ├── routers/memories.py # REST API
@@ -28,7 +28,7 @@ mem0/
 
 - **LLM**: Ollama (qwen2.5:7b) — 本地运行
 - **Embedding**: Ollama (nomic-embed-text) — 768 维
-- **向量库**: Qdrant — collection `openmemory_768`
+- **向量库**: Qdrant — collection `memverse_768`
 - **元数据**: SQLite (`openmemory.db`)
 - **后端**: Python 3.12 + FastAPI
 - **MCP**: SSE 传输，Cursor 通过 `http://<host>:8765/api/mcp/sse` 连接

@@ -1,0 +1,35 @@
+---
+description: Memverse MCP 开发注意事项（记忆交互协议见全局规则 mem0-memory）
+globs: memverse/api/**/*.py, openclaw/**/*.ts
+alwaysApply: false
+---
+
+# Memverse MCP 开发注意事项
+
+修改 MCP 相关代码时的关键约束。记忆交互协议见全局规则，这里只关注开发。
+
+## MCP 工具清单
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `add_memories` | `text: str, infer: bool=True, instructions: str="", expires_at: str="", run_id: str=""` | 写入记忆，触发后台分类+实体提取。`infer=False` 跳过 LLM；`run_id` 实现会话级记忆分组 |
+| `search_memory` | `query: str, limit: int=100, categories: str=""` | 混合搜索（向量+关键词+域+图谱），支持 category 过滤 |
+| `list_memories` | 无 | 列出全部（慎用） |
+| `delete_memories` | `memory_ids: list[str]` | 按 ID 删除 |
+| `delete_all_memories` | 无 | 清空全部（危险） |
+| `update_memory` | `memory_id: str, new_content: str` | 更新记忆内容，触发重分类+实体提取 |
+| `archive_memories` | `memory_ids: list[str]` | 批量归档记忆 |
+| `restore_memories` | `memory_ids: list[str]` | 恢复已归档记忆 |
+| `export_memories` | `format: str="json"` | 结构化导出（json/text），按 category 分组 |
+| `consolidate_memories` | `dry_run: bool=True` | 发现并合并相似/重复记忆，dry_run=True 预览 |
+| `check_contradiction` | `text: str` | 检测新记忆是否与已有记忆矛盾 |
+| `search_entities` | `query: str, limit: int=20` | 在知识图谱中搜索实体及其关系 |
+| `list_graph_entities` | `limit: int=100` | 列出知识图谱中所有实体 |
+
+## 修改 MCP 工具时的检查清单
+
+- [ ] ADD/UPDATE 事件后触发 `categorize_memory_background` 和 `_run_entity_extraction_in_background`
+- [ ] MCP 中用 `threading.Thread(daemon=True)` 跑后台任务（无法用 BackgroundTasks）
+- [ ] REST API 对应端点同步修改，保持双通道一致
+- [ ] Qdrant payload 字段名使用 snake_case
+- [ ] 重建容器后提醒用户在 Cursor 中重连 MCP

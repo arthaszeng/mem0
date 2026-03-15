@@ -27,7 +27,7 @@ class TestReservedSlugs:
     RESERVED = [
         "login", "settings", "admin", "invite", "change-password",
         "api", "api-keys", "projects", "memory", "memories", "apps",
-        "auth", "memory-mcp", "concierge-mcp", "health",
+        "auth", "memverse-mcp", "concierge-mcp", "health",
     ]
 
     @pytest.mark.parametrize("slug", RESERVED)

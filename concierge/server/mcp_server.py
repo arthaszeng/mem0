@@ -47,17 +47,17 @@ concierge = ConciergeClient(
 )
 
 
-_OPENMEMORY_URL = os.getenv("OPENMEMORY_URL", "http://openmemory-mcp:8765")
+_MEMVERSE_URL = os.getenv("MEMVERSE_URL", "http://memverse-mcp:8765")
 _MEMORY_SYNC_TRUNCATE = 2000
 
 
 async def _save_to_memory(username: str, text: str):
-    """Fire-and-forget: save a Concierge interaction to OpenMemory."""
+    """Fire-and-forget: save a Concierge interaction to Memverse."""
     try:
         truncated = text[:_MEMORY_SYNC_TRUNCATE] + "…" if len(text) > _MEMORY_SYNC_TRUNCATE else text
         async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.post(
-                f"{_OPENMEMORY_URL}/api/v1/memories/",
+                f"{_MEMVERSE_URL}/api/v1/memories/",
                 json={"text": truncated, "app": "Concierge", "infer": True},
                 headers={
                     "X-Auth-User-Id": username,

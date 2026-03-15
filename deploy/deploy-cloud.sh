@@ -45,20 +45,20 @@ ssh_cloud "
   mkdir -p \$BACKUP_DIR
 
   # Backup images
-  for svc in openmemory-mcp openmemory-ui auth-service concierge-mcp langgraph-agent; do
-    docker tag \"mem0/\${svc}:latest\" \"mem0/\${svc}:pre-upgrade\" 2>/dev/null || true
+  for svc in memverse-mcp memverse-ui auth-service concierge-mcp langgraph-agent; do
+    docker tag \"memverse/\${svc}:latest\" \"memverse/\${svc}:pre-upgrade\" 2>/dev/null || true
   done
 
   # Backup databases
-  docker cp workspace-openmemory-mcp-1:/data/openmemory.db \$BACKUP_DIR/openmemory.db 2>/dev/null || true
+  docker cp workspace-memverse-mcp-1:/data/openmemory.db \$BACKUP_DIR/openmemory.db 2>/dev/null || true
   docker cp workspace-auth-service-1:/data/auth.db         \$BACKUP_DIR/auth.db 2>/dev/null || true
 
   # Backup env
   cp ${CLOUD_WORKSPACE}/.env \$BACKUP_DIR/.env 2>/dev/null || true
 
   # Record image digests
-  for svc in openmemory-mcp openmemory-ui auth-service concierge-mcp langgraph-agent; do
-    echo \"\${svc}: \$(docker inspect --format='{{.Id}}' mem0/\${svc}:latest 2>/dev/null || echo 'N/A')\"
+  for svc in memverse-mcp memverse-ui auth-service concierge-mcp langgraph-agent; do
+    echo \"\${svc}: \$(docker inspect --format='{{.Id}}' memverse/\${svc}:latest 2>/dev/null || echo 'N/A')\"
   done > \$BACKUP_DIR/image-digests.txt
 
   echo 'Backup complete'
@@ -69,11 +69,11 @@ log_step "Pulling v${VERSION} images on cloud (ACR VPC)"
 ssh_cloud "
   sudo docker login --username=${ACR_USER} ${ACR_VPC} 2>&1 | tail -1
 
-  for svc in openmemory-mcp openmemory-ui auth-service concierge-mcp; do
+  for svc in memverse-mcp memverse-ui auth-service concierge-mcp langgraph-agent; do
     echo \"Pulling \${svc}...\"
     sudo docker pull ${ACR_VPC}/${ACR_NAMESPACE}/\${svc}:${VERSION}-amd64 2>&1 | tail -1
-    docker tag ${ACR_VPC}/${ACR_NAMESPACE}/\${svc}:${VERSION}-amd64 mem0/\${svc}:${VERSION}
-    docker tag ${ACR_VPC}/${ACR_NAMESPACE}/\${svc}:${VERSION}-amd64 mem0/\${svc}:latest
+    docker tag ${ACR_VPC}/${ACR_NAMESPACE}/\${svc}:${VERSION}-amd64 memverse/\${svc}:${VERSION}
+    docker tag ${ACR_VPC}/${ACR_NAMESPACE}/\${svc}:${VERSION}-amd64 memverse/\${svc}:latest
   done
 
   echo 'Pull and retag complete'

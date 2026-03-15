@@ -1,8 +1,8 @@
   {
     "openapi": "3.1.0",
     "info": {
-      "title": "OpenMemory",
-      "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
+"title": "Memverse",
+    "description": "Personal AI memory system — store, search, and manage your memories across AI clients",
       "version": "1.6.0"
     },
     "servers": [

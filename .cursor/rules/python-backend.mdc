@@ -1,15 +1,15 @@
 ---
-description: OpenMemory Python 后端开发规范
-globs: openmemory/api/**/*.py
+description: Memverse Python 后端开发规范
+globs: memverse/api/**/*.py
 alwaysApply: false
 ---
 
-# OpenMemory Python 后端规范
+# Memverse Python 后端规范
 
 ## 架构概览
 
 - **框架**: FastAPI + SQLAlchemy (SQLite)
-- **向量存储**: Qdrant（`mem0_store` 容器，端口 6333）
+- **向量存储**: Qdrant（`memverse_store` 容器，端口 6333）
 - **LLM/Embedding**: Ollama (本地) 或 OpenAI (云端)，通过 CATEGORIZATION_PROVIDER 配置
 - **MCP Server**: SSE 传输，端口 8765
 

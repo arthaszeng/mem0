@@ -20,10 +20,10 @@ docker run -d \
 
 | 路径 | 协议 | 上游端口 | 服务 |
 |------|------|----------|------|
-| `/memory-mcp/` | HTTP + HTTPS | 8765 | OpenMemory MCP SSE |
+| `/memverse-mcp/` | HTTP + HTTPS | 8765 | Memverse MCP SSE |
 | `/concierge-mcp/` | HTTP + HTTPS | 8767 | Concierge MCP SSE |
-| `/api/` | HTTPS | 8765 | OpenMemory REST API |
-| `/memory` | HTTPS | 3001 | OpenMemory UI |
+| `/api/` | HTTPS | 8765 | Memverse REST API |
+| `/memory` | HTTPS | 3001 | Memverse UI |
 | `/agent/` | HTTPS | 8766 | LangGraph Agent |
 | `/chat` | HTTPS | 302 → :3211 | Lobe Chat |
 | `:3211/` | HTTPS | 3210 | Lobe Chat (直连) |

@@ -1,0 +1,203 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Memverse API",
+    "description": "Personal memory system for Arthas. Search, store, and manage long-term memories across AI clients.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://classroom-seasonal-verbal-unix.trycloudflare.com",
+      "description": "Memverse cloud server (via Cloudflare Tunnel)"
+    }
+  ],
+  "paths": {
+    "/api/v1/memories/search": {
+      "post": {
+        "operationId": "searchMemories",
+        "summary": "Semantic search over stored memories",
+        "description": "Search memories by meaning using vector similarity. Call this EVERY TIME you need context about the user, their projects, preferences, or past decisions.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query", "user_id"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Natural language search query (e.g. 'my work projects', 'technical preferences')"
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "default": "arthaszeng",
+                    "description": "User ID, always 'arthaszeng'"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Max results to return"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "memory": { "type": "string" },
+                          "score": { "type": "number" },
+                          "created_at": { "type": "string" },
+                          "updated_at": { "type": "string" },
+                          "metadata": { "type": "object" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memories/": {
+      "post": {
+        "operationId": "createMemory",
+        "summary": "Store a new memory",
+        "description": "Save important information to long-term memory. Use this when the user shares personal details, makes a decision, or explicitly asks you to remember something.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["user_id", "text"],
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "default": "arthaszeng",
+                    "description": "User ID, always 'arthaszeng'"
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "The information to remember. Write as a complete, self-contained Chinese statement with enough context."
+                  },
+                  "app": {
+                    "type": "string",
+                    "default": "chatgpt",
+                    "description": "Source app identifier"
+                  },
+                  "infer": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether to use LLM to extract and deduplicate facts"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory created successfully"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listMemories",
+        "summary": "List all memories with pagination",
+        "description": "Browse stored memories. Use sparingly — prefer searchMemories for targeted retrieval.",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "default": "arthaszeng" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": { "type": "integer", "default": 20 }
+          },
+          {
+            "name": "search_query",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Text search filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated memory list"
+          }
+        }
+      }
+    },
+    "/api/v1/memories/{memory_id}": {
+      "get": {
+        "operationId": "getMemory",
+        "summary": "Get a specific memory by ID",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Memory details" }
+        }
+      },
+      "put": {
+        "operationId": "updateMemory",
+        "summary": "Update a memory's content",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["memory_content", "user_id"],
+                "properties": {
+                  "memory_content": { "type": "string" },
+                  "user_id": { "type": "string", "default": "arthaszeng" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Memory updated" }
+        }
+      }
+    }
+  }
+}

@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Roadmap 同步规则
 
-每次完成 feature 或重要 fix 变更时，**必须**同步更新 `openmemory/ui/data/roadmap.md`。
+每次完成 feature 或重要 fix 变更时，**必须**同步更新 `memverse/ui/data/roadmap.md`。
 
 ## 要求
 

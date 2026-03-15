@@ -1,4 +1,4 @@
-# OpenMemory MCP 连接调试指南
+# Memverse MCP 连接调试指南
 
 ## 诊断结论（2025-03）
 
@@ -12,7 +12,7 @@
 ```bash
 # 测试 HTTPS（跳过证书校验）
 curl -k -m 5 -H "Authorization: Bearer <your-api-key>" \
-  "https://arthaszeng.top/memory-mcp/cursor/sse/arthaszeng"
+  "https://arthaszeng.top/memverse-mcp/cursor/sse/arthaszeng"
 ```
 
 若看到 `event: endpoint` 和 `data: /memory-mcp/messages/...`，说明服务端正常。
@@ -38,8 +38,8 @@ openssl s_client -connect arthaszeng.top:443 -servername arthaszeng.top </dev/nu
 // ~/.cursor/mcp.json
 {
   "mcpServers": {
-    "OpenMemory": {
-      "url": "http://arthaszeng.top/memory-mcp/cursor/sse/arthaszeng",
+    "Memverse": {
+      "url": "http://arthaszeng.top/memverse-mcp/cursor/sse/arthaszeng",
       "headers": {
         "Authorization": "Bearer <your-api-key>"
       }
@@ -52,11 +52,11 @@ openssl s_client -connect arthaszeng.top:443 -servername arthaszeng.top </dev/nu
 
 ### 3. 本地开发用 localhost
 
-若 OpenMemory 在本地运行：
+若 Memverse 在本地运行：
 
 ```json
-"OpenMemory": {
-  "url": "http://localhost:8765/memory-mcp/cursor/sse/arthaszeng",
+"Memverse": {
+  "url": "http://localhost:8765/memverse-mcp/cursor/sse/arthaszeng",
   "headers": {
     "Authorization": "Bearer <your-api-key>"
   }
@@ -65,20 +65,20 @@ openssl s_client -connect arthaszeng.top:443 -servername arthaszeng.top </dev/nu
 
 ### 4. Cursor 设置
 
-- 打开 Cursor Settings → MCP → 查看 OpenMemory 的详细错误
+- 打开 Cursor Settings → MCP → 查看 Memverse 的详细错误
 - 重启 Cursor 后重试连接
-- 确认 API Key 未过期（在 OpenMemory UI 的 API Keys 页面检查）
+- 确认 API Key 未过期（在 Memverse UI 的 API Keys 页面检查）
 
 ## 配置格式参考
 
 | 场景 | URL 格式 |
 |------|----------|
-| 无项目 | `{base}/memory-mcp/{client}/sse/{user_id}` |
-| 有项目 | `{base}/memory-mcp/p/{project_slug}/{client}/sse` |
+| 无项目 | `{base}/memverse-mcp/{client}/sse/{user_id}` |
+| 有项目 | `{base}/memverse-mcp/p/{project_slug}/{client}/sse` |
 
 示例：
-- `https://arthaszeng.top/memory-mcp/cursor/sse/arthaszeng`
-- `https://arthaszeng.top/memory-mcp/p/my-project/cursor/sse`
+- `https://arthaszeng.top/memverse-mcp/cursor/sse/arthaszeng`
+- `https://arthaszeng.top/memverse-mcp/p/my-project/cursor/sse`
 
 ## 常见错误
 

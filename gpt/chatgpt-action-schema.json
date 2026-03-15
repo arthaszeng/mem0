@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Arthas AI Platform (Private)",
-    "description": "OpenMemory (personal memory system) + Concierge (Sanofi AI assistant) — private use only",
+    "description": "Memverse (personal memory system) + Concierge (Sanofi AI assistant) — private use only",
     "version": "2.4.0"
   },
   "servers": [

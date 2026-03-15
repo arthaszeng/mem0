@@ -188,7 +188,7 @@ qdrant_storage/
 testing.ipynb
 *.tar
 *.tar.gz
-openmemory/ui/tsconfig.tsbuildinfo
+memverse/ui/tsconfig.tsbuildinfo
 
 # Environment files with secrets
 .env.local
