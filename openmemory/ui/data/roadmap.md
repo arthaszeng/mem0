@@ -174,3 +174,15 @@ LLM 驱动的智能洞察 — 用户画像 + 主题趋势 + 知识覆盖度
 - [x] **Insights REST API** — /api/v1/memories/stats/insights 端点，支持 refresh 参数强制重新生成画像
 - [x] **MCP get_insights 工具** — AI 客户端可直接查询记忆洞察，含画像 + 趋势 + 覆盖度
 - [x] **Dashboard Insights 面板** — 三栏布局：Memory Profile 卡 + Trending Topics 标签云 + Knowledge Coverage 进度条
+
+## v1.7 | Security & Concierge | completed | 2026-03 | shield-check
+
+统一认证体系 + Concierge 安全重构 + 记忆自动同步 + 部署流水线
+
+- [x] **Auth Service 统一认证** — 独立 JWT/OAuth2 认证服务，nginx auth_request 网关鉴权，注入 X-Auth-Username
+- [x] **Chrome 扩展 v2.0** — 从硬编码 API Key 迁移到 Auth Service JWT 登录，chrome.storage.local 管理 token
+- [x] **Concierge 安全重构** — 移除自建 OAuth 服务器（jwt_manager / oauth_endpoints / authorize.html），全走 Auth Service 网关
+- [x] **Concierge 记忆同步** — concierge_chat/search 交互自动同步到 OpenMemory（source_app=Concierge，infer=True，异步不阻塞）
+- [x] **用户隔离审计** — 移除 cookie_store.get_any() fallback，所有路径严格按 user_id 隔离
+- [x] **部署脚本体系** — build.sh / push.sh / deploy-cloud.sh / rollback-cloud.sh，ACR 推送 + SSH 部署 + 健康检查
+- [x] **版本管理规范** — VERSION 文件统一版本号，deploy 脚本自动读取，镜像 tag 与版本同步

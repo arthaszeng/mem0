@@ -1,0 +1,16 @@
+---
+description: 每次 feature/fix 变更必须同步更新 Roadmap
+alwaysApply: true
+---
+
+# Roadmap 同步规则
+
+每次完成 feature 或重要 fix 变更时，**必须**同步更新 `openmemory/ui/data/roadmap.md`。
+
+## 要求
+
+- 版本号必须与 `VERSION` 文件一致
+- 新版本条目格式：`## vX.Y | 标题 | status | YYYY-MM | icon`
+- Feature 用 checkbox：`[x]` = completed, `[-]` = in_progress, `[ ]` = upcoming
+- 每条 Feature 格式：`- [x] **名称** — 描述`
+- 提交前确认 roadmap 已更新，否则 PR / commit 不完整
